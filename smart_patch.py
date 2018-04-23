@@ -13,6 +13,8 @@ import fgbuster.algebra as fgal
 #input_set_of_betas is a list of all betas for each component and patch i.e. input_set_of_betas=[beta_d1,beta_d2,...,beta_dn,beta_s1,...,beta_sm,temp1,...,templ]
     #by convention the component are ordered as beta_dust,beta_sync,temperature_dust
 
+
+#------------------------------------------------------SKY GENERATION----------------------------------------------------
 nside = 2
 pixel_number=hp.nside2npix(nside)
 sky = get_sky(nside, 'c1d1s1')
@@ -22,63 +24,35 @@ freq_maps=freq_maps[:,1:,:]  #on retire la temperature (1:) car on ne prend en c
 components = [CMB(), Dust(150.), Synchrotron(20.)]
 prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)         # correspond a N^-1/2
 
-print(prewhiten_factors.shape)
-print(freq_maps.shape)
-# def _vtmv(v,m,w):
-#     return np.einsum("i,ij,j->",v,m,w,optimize=OPTIMIZE)
 
-#meta_P=[range(6143),range(6143,12288)]
-#input_set_of_betas=[1.59,19.6,-3.1,1.59,19.6,-3.1]
-input_beta_zeroth_iteration=[]
-for i in range(pixel_number):
-    input_beta_zeroth_iteration.append(1.59)
 
-for i in range(pixel_number):
-    input_beta_zeroth_iteration.append(19.6)
-for i in range(pixel_number):
-    input_beta_zeroth_iteration.append(-3.1)
+# P_d=[range(24),range(24,48)]
+# P_t=[range(48)]
+# P_s=[range(12),range(12,24),range(24,36),range(36,48)]
+# for i in range(len(P_s)):
+#     try:
+#         P_s[i].index(45)
+#         bd_index=i
+#         print('bd_index=',bd_index)
+#     except:
+#         pass
+# print bd_index
+#
+# input_set_of_betas=[1.59,1.59,19.6,-3.1,-3.1,-3.1,-3.1]
 
-P_d=[range(24),range(24,48)]
-P_t=[range(48)]
-P_s=[range(12),range(12,24),range(24,36),range(36,48)]
-for i in range(len(P_s)):
-    try:
-        P_s[i].index(45)
-        bd_index=i
-        print('bd_index=',bd_index)
-    except:
-        pass
-print bd_index
-
-input_set_of_betas=[1.59,1.59,19.6,-3.1,-3.1,-3.1,-3.1]
-
+#-----------------------------------------The A matrix and the likelihood function are computed once and for all in the program------------
 prewhitened_data = prewhiten_factors * np.transpose(freq_maps)
 A_ev, A_dB_ev, comp_of_param, x0, params = _A_evaluators(components, instrument, prewhiten_factors=prewhiten_factors)
 A_dB_ev, comp_of_dB = fgal._A_dB_ev_and_comp_of_dB_as_compatible_list(A_dB_ev, comp_of_param, x0)
 fun=[]
 last_values=[]
 for p in range(hp.nside2npix(nside)):
-    #prendre un pixel ! garder prewhiten_factors * np.transpose(data[l]) en mémoire pas la peine de faire le calclul pour chaque pixel
     funtemp, jactemp, last_valuestemp = fgal._build_bound_inv_logL_and_logL_dB(A_ev, prewhitened_data,np.diag(prewhiten_factors) , A_dB_ev, comp_of_param)
     fun.append(funtemp)
     last_values.append(last_valuestemp)
+#the Likelihood function is computed for each pixel and storred in the fun array where each element is the likelihood function for the corresponding pixel
 
-#meta_P=np.multidim_intersect(P_d,np.multidim_intersect(P_s,P_t))
-meta_P=[]
-# d_inter_s=[]
-# for i in range(2):
-#     #for j in range(len(P_s)):
-#     d_inter_s.append([list(filter(lambda x: x in P_d[i], sublist)) for sublist in P_t])
-# for i in range(4):
-#     for j in range(2):
-#         meta_P.append([list(filter(lambda x: x in P_s[i], sublist)) for sublist in d_inter_s[j]][0])
-#
-# meta_P=[meta_P[0],meta_P[2],meta_P[5],meta_P[7]]
-# input_set_of_betas=[1.59,19.6,-3.1,1.59,19.6,-3.1,1.59,19.6,-3.1,1.59,19.6,-3.1]
-
-
-
-def data_patch(freq_maps,meta_P): #works for patches as well as for meta patches
+def data_patch(freq_maps,meta_P): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
     data=[]
     temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
     for i in range(len(meta_P)):
@@ -93,7 +67,8 @@ def data_patch(freq_maps,meta_P): #works for patches as well as for meta patches
 
 
 
-def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data): #prewhiten_factors must be defined above !
+def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data): #computes the joint likelihood for the whole sky taking into account the patches
+    #prewhiten_factors must be defined above !
     logL_spec=0
     #first we have to create the maps of beta in the sky to link each patch with its corresponding beta value
     ind=0
@@ -121,14 +96,14 @@ def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data): #prewhiten_f
     del map_bd,map_bt,map_bs
     return logL_spec
 
-def sigma_matrix_making(minimization_result,P_d,P_t,P_s,data):
+def sigma_matrix_making(minimization_result,P_d,P_t,P_s,data): #computes the sigma matrix for each patch and creates the total sigma matrix for the whole sky
     ind=0
     pixel_number=hp.nside2npix(nside)
     map_bd=[None]*pixel_number
     map_bt=[None]*pixel_number
     map_bs=[None]*pixel_number
-    sigma_tot=[[0for j in range(len(minimization_result.x))]for i in range(len(minimization_result.x))]
-    print(sigma_tot)
+    sigma_tot=[[0 for j in range(len(minimization_result.x))]for i in range(len(minimization_result.x))]
+    # print(sigma_tot)
     #print(sigma_tot[0][0])
     for i in range(len(P_d)):
         for j in range(len(P_d[i])):
@@ -195,7 +170,7 @@ def sigma_matrix_making(minimization_result,P_d,P_t,P_s,data):
 
     return(sigma_tot)
 
-def delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration):
+def delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration): #computes the spatial delta over the betas in a patch
     ind=0
     pixel_number=hp.nside2npix(nside)
     beta_d_list=[]
@@ -208,47 +183,43 @@ def delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration):
         beta_d_list=[]
         for j in range(len(P_d[i])):
             beta_d_list.append(input_beta_zeroth_iteration[P_d[i][j]])
-            print(beta_d_list)
+            # print(beta_d_list)
         delta_beta.append(np.std(beta_d_list))
-        print(np.std(beta_d_list))
-    print(delta_beta)
+        # print(np.std(beta_d_list))
+    # print(delta_beta)
     for i in range(len(P_t)):
         beta_t_list=[]
         for j in range(len(P_t[i])):
             beta_t_list.append(input_beta_zeroth_iteration[pixel_number+P_t[i][j]])
-            print(beta_t_list)
+            # print(beta_t_list)
         delta_beta.append(np.std(beta_t_list))
-        print(np.std(beta_t_list))
-    print(delta_beta)
+        # print(np.std(beta_t_list))
+    # print(delta_beta)
     for i in range(len(P_s)):
         beta_s_list=[]
         for j in range(len(P_s[i])):
             beta_s_list.append(input_beta_zeroth_iteration[2*pixel_number+P_s[i][j]])
         delta_beta.append(np.std(beta_s_list))
-    print(delta_beta)
+    # print(delta_beta)
     return(np.diag(delta_beta))
 
-def patch_making(input_set_of_betas,freq_maps,data_0,sigma,deltab):
+def matrix_comparison(delta_beta,sigma_matrix): #compares the delta matrix with the sigma matrix
+    delta_beta2=np.dot(delta_beta,delta_beta)
+    norm=np.linalg.norm(np.absolute(delta_beta2-sigma_matrix)) #%! is the determinant the right kind of norm to choose ?
+    return norm
+
+def patch_making(input_set_of_betas,input_beta_zeroth_iteration,freq_maps,sigma,deltab):
+
     return 0
 
 #--------------------------------------TEST------------------------------------------
-# P_d=[]
-# P_s=[]
-# P_t=[]
-# for i in range(len(freq_maps[0][1])): P_d.append([i])
-# for i in range(len(freq_maps[0][1])): P_s.append([i])
-# for i in range(len(freq_maps[0][1])): P_t.append([i])
+#
 
 # map_bd=freq_maps[0][1]*0
 # map_bs=freq_maps[0][1]*0
 # map_t=freq_maps[0][1]*0
 
-#beta initialisation
-# input_set_of_betas=[]
-# for i in range(len(freq_maps[0][0])):
-#     input_set_of_betas.append(1.59)
-#     input_set_of_betas.append(19.6)
-#     input_set_of_betas.append(-3.1)
+
 
 #meta patch initialisation: one patch per pixel
 #meta_P=[[i] for i in range(len(freq_maps[0][0]))]
@@ -287,19 +258,48 @@ def patch_making(input_set_of_betas,freq_maps,data_0,sigma,deltab):
 #
 #print(minimization_check)
 # data=data_patch(freq_maps,meta_P)
-print(joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,freq_maps))
+# print(joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,freq_maps))
+
+
+#-----------------------------------------------ZEROTH ITERATION----------------------------------------------------------------------
+P_d=[]
+P_s=[]
+P_t=[]
+for i in range(len(freq_maps[0][1])): P_d.append([i])
+for i in range(len(freq_maps[0][1])): P_s.append([i])
+for i in range(len(freq_maps[0][1])): P_t.append([i])
+
+#beta initialisation
+input_set_of_betas=[]
+for i in range(len(freq_maps[0][0])):
+    input_set_of_betas.append(1.59)
+for i in range(len(freq_maps[0][0])):
+    input_set_of_betas.append(19.6)
+for i in range(len(freq_maps[0][0])):
+    input_set_of_betas.append(-3.1)
 
 minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,input_set_of_betas,(P_d,P_t,P_s,freq_maps))
 print(minimization_result)
-print(minimization_result.x)
+print('newbeta=',minimization_result.x)
+input_beta_zeroth_iteration=minimization_result.x
 sigma=sigma_matrix_making(minimization_result,P_d,P_t,P_s,freq_maps)
+print('sigma=')
 for i in range(len(sigma)):
     print(sigma[i])
-print(np.shape(sigma))
+print('shape sigma=',np.shape(sigma))
+a=delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration)
+print('delta=',a)
+print('comp=',matrix_comparison(a,sigma))
 
-print(delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration))
-#------------------------------FISHER MATRIX CONSTRUCTION--------------------------------
+hp.mollview(input_beta_zeroth_iteration[:48])
+plt.title('beta dust map')
+plt.show()
 
 
-#def patch_making(P_d,P_s,P_t):
-#def meta_patch_making
+hp.mollview(input_beta_zeroth_iteration[48:96])
+plt.title('dust temp map')
+plt.show()
+
+hp.mollview(input_beta_zeroth_iteration[96:144])
+plt.title('beta sync map')
+plt.show()
