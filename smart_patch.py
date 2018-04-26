@@ -59,21 +59,40 @@ prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)         
 
 
 
-
-def data_patch(freq_maps,meta_P): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
+def data_patch(freq_maps,P_i): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
     data=[]
     temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
-    for i in range(len(meta_P)):
+    for i in range(len(P_i)):
         for f in range(len(freq_maps)):
             for s in range(len(freq_maps[0])):
-                for p in range(len(meta_P[i])):
-                    temp_list[f][s].append(freq_maps[f][s][meta_P[0][0]])
+                for p in range(len(P_i[i])):
+                    temp_list[f][s].append(freq_maps[f][s][P_i[0][0]])
         data.append(temp_list)# for p in range(len(meta_P[i])))
         temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
     del temp_list
     return data
 
 
+def patch_map(input_set_of_betas,P_d,P_t,P_s):
+    ind=0
+    map_bd=[None]*pixel_number
+    map_bt=[None]*pixel_number
+    map_bs=[None]*pixel_number
+
+    for i in range(len(P_d)):
+        for j in range(len(P_d[i])):
+            map_bd[P_d[i][j]]=input_set_of_betas[ind]
+        ind+=1
+    for i in range(len(P_t)):
+        for j in range(len(P_t[i])):
+            map_bt[P_t[i][j]]=input_set_of_betas[ind]
+        ind+=1
+
+    for i in range(len(P_s)):
+        for j in range(len(P_s[i])):
+            map_bs[P_s[i][j]]=input_set_of_betas[ind]
+        ind+=1
+    return map_bd,map_bt,map_bs
 
 
 def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data): #computes the joint likelihood for the whole sky taking into account the patches
@@ -104,7 +123,6 @@ def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data): #computes th
         logL_spec+=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
     del map_bd,map_bt,map_bs
     return logL_spec
-
 
 
 
@@ -194,7 +212,6 @@ def sigma_matrix_making(minimization_result,P_d,P_t,P_s,data): #computes the sig
 
 
 
-
 def delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration): #computes the spatial delta over the betas in a patch
     ind=0
     pixel_number=hp.nside2npix(nside)
@@ -230,12 +247,10 @@ def delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration): #computes
 
 
 
-
 def matrix_comparison(delta_beta,sigma_matrix): #compares the delta matrix with the sigma matrix
     delta_beta2=np.dot(delta_beta,delta_beta)
-    norm=np.linalg.norm(np.absolute(delta_beta2-sigma_matrix)) #%! is the determinant the right kind of norm to choose ?
+    norm=np.linalg.norm(np.absolute(delta_beta2-sigma_matrix),1) #%! is the determinant the right kind of norm to choose ?
     return norm
-
 
 
 
@@ -284,7 +299,7 @@ def patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s):   # patch makin
         max_beta_d_in_list=np.amax(np.take(input_beta_zeroth_iteration,temp_list2))
         set_of_beta_slice.append((min_beta_d_in_list+max_beta_d_in_list)/2)
 
-        #-------------------------------------------------P_t CONSTRUCTION----------------------------------------------------
+    #-------------------------------------------------P_t CONSTRUCTION----------------------------------------------------
 
     temp_list2=[]
     inf_boundary_t=min_beta_t
@@ -300,21 +315,22 @@ def patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s):   # patch makin
         temp_list2=[]
         inf_boundary_t=inf_boundary_t+np.sqrt(sigma[j+len(P_d)][j+len(P_d)])
         sup_boundary_t=sup_boundary_t+np.sqrt(sigma[j+1+len(P_d)][j+1+len(P_d)])
-
     temp_list2=[]
     for i in range(pixel_number):
         if np.isnan(temp_dust_slice[i]):
             temp_list2.append(i)
+
     if len(temp_list2) >=1:
-        for j in range(len(temp_list2)):
-            temp_list2[j]=temp_list2[j]+pixel_number
-        min_beta_t_in_list=np.amin(np.take(input_beta_zeroth_iteration,temp_list2))
-        max_beta_t_in_list=np.amax(np.take(input_beta_zeroth_iteration,temp_list2))
-        set_of_beta_slice.append((min_beta_t_in_list+max_beta_t_in_list)/2)
         P_t_new.append(temp_list2)
+        temp_list3=[0]*len(temp_list2)
+        for j in range(len(temp_list2)):
+            temp_list3[j]=temp_list2[j]+pixel_number
+        min_beta_t_in_list=np.amin(np.take(input_beta_zeroth_iteration,temp_list3))
+        max_beta_t_in_list=np.amax(np.take(input_beta_zeroth_iteration,temp_list3))
+        set_of_beta_slice.append((min_beta_t_in_list+max_beta_t_in_list)/2)
 
-
-        #-------------------------------------------------P_s CONSTRUCTION----------------------------------------------------
+    del temp_list3
+    #-------------------------------------------------P_s CONSTRUCTION----------------------------------------------------
     temp_list2=[]
     inf_boundary_s=min_beta_s
     sup_boundary_s=min_beta_s+np.sqrt(sigma[len(P_d)+len(P_t)][len(P_d)+len(P_t)])
@@ -332,17 +348,19 @@ def patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s):   # patch makin
 
     temp_list2=[]
     for i in range(pixel_number):
-        if np.isnan(temp_dust_slice[i]):
+        if np.isnan(beta_sync_slice[i]):
             temp_list2.append(i)
+            # print i
     if len(temp_list2) >=1:
+        P_s_new.append(temp_list2)
+        temp_list3=[0]*len(temp_list2)
         for j in range(len(temp_list2)):
-            temp_list2[j]=temp_list2[j]+2*pixel_number
-        min_beta_s_in_list=np.amin(np.take(input_beta_zeroth_iteration,temp_list2))
-        max_beta_s_in_list=np.amax(np.take(input_beta_zeroth_iteration,temp_list2))
+            temp_list3[j]=temp_list2[j]+2*pixel_number
+        min_beta_s_in_list=np.amin(np.take(input_beta_zeroth_iteration,temp_list3))
+        max_beta_s_in_list=np.amax(np.take(input_beta_zeroth_iteration,temp_list3))
         set_of_beta_slice.append((min_beta_s_in_list+max_beta_s_in_list)/2)
-        P_t_new.append(temp_list2)
     temp_list2=[]
-
+    del temp_list2,temp_list3
     return P_d_new,P_t_new,P_s_new,set_of_beta_slice
 
 #--------------------------------------TEST------------------------------------------
@@ -420,15 +438,10 @@ A_ev, A_dB_ev, comp_of_param, x0, params = _A_evaluators(components, instrument,
 A_dB_ev, comp_of_dB = fgal._A_dB_ev_and_comp_of_dB_as_compatible_list(A_dB_ev, comp_of_param, x0)
 
 for l in range(len(P_d)):
-     # for p in range(len(P_d[l])):
-             # beta_pix=[map_bd[p],map_bs[p],map_t[p]]
-     #print beta_pix
      prewhitened_data = prewhiten_factors * np.transpose(data[l])
-     #print('prewhitened_data.shape=',prewhitened_data.shape)
      funtemp, jactemp, last_valuestemp = fgal._build_bound_inv_logL_and_logL_dB(A_ev, prewhitened_data,np.diag(prewhiten_factors) , A_dB_ev, comp_of_param)
      fun.append(funtemp)
      last_values.append(last_valuestemp)
-     # print(funtemp([1.59,19.6,-3.1]))
      del funtemp, jactemp,last_valuestemp
 
 
@@ -438,37 +451,73 @@ for l in range(len(P_d)):
 #     fun.append(funtemp)
 #     last_values.append(last_valuestemp)
 #     print(funtemp([1.59,19.6,-3.1]))
-
+comp=[]
 minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,input_set_of_betas,(P_d,P_t,P_s,freq_maps))
-print(minimization_result)
-print('newbeta=',minimization_result.x)
+# print(minimization_result)
+# print('newbeta=',minimization_result.x)
 input_beta_zeroth_iteration=minimization_result.x
 sigma=sigma_matrix_making(minimization_result,P_d,P_t,P_s,freq_maps)
-print('sigma=')
-for i in range(len(sigma)):
-    print(np.sqrt(sigma[i][i]))
+# print('sigma=')
+# for i in range(len(sigma)):
+#     print(np.sqrt(sigma[i][i]))
 # print('shape sigma=',np.shape(sigma))
-print(np.shape(input_beta_zeroth_iteration))
+# print(np.shape(input_beta_zeroth_iteration))
 a=delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration)
 # print('delta=',a)
-print('comp=',matrix_comparison(a,sigma))
-print('input_beta_zeroth_iteration=',input_beta_zeroth_iteration)
+comp.append(matrix_comparison(a,sigma))
+# print('matrix comparison=',comp[0])
+# print('input_beta_zeroth_iteration=',input_beta_zeroth_iteration)
 P_d_new,P_t_new,P_s_new,set_of_beta_slice=patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s)
-print('P_d_new=',P_d_new)
-print('P_t_new=',P_t_new)
-print('P_s_new=',P_s_new)
-print('set_of_beta_slice=',set_of_beta_slice)
+# print('P_d_new=',P_d_new)
+# print('P_t_new=',P_t_new)
+# print('P_s_new=',P_s_new)
+# print('set_of_beta_slice=',set_of_beta_slice)
+
+# hp.mollview(input_beta_zeroth_iteration[:48])
+# plt.title('beta dust map')
+# plt.show()
+# hp.mollview(input_beta_zeroth_iteration[48:96])
+# plt.title('dust temp map')
+# plt.show()
+# hp.mollview(input_beta_zeroth_iteration[96:144])
+# plt.title('beta sync map')
+# plt.show()
 
 
-hp.mollview(input_beta_zeroth_iteration[:48])
-plt.title('beta dust map')
-plt.show()
+for i in range(10):
+    map_b,map_t,map_s=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new)
+    hp.mollview(np.array(map_b),sub=(2,2,1))
+    plt.title('beta dust map iteration %s' %(i))
+    hp.mollview(np.array(map_t),sub=(2,2,2))
+    plt.title('dust temp map iteration %s' %(i))
+    hp.mollview(np.array(map_s),sub=(2,2,3))
+    plt.title('beta sync map iteration %s' %(i))
+    plt.subplot(2,2,4)
+    plt.plot(comp)
+    plt.show()
 
 
-hp.mollview(input_beta_zeroth_iteration[48:96])
-plt.title('dust temp map')
-plt.show()
+    minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,freq_maps))
 
-hp.mollview(input_beta_zeroth_iteration[96:144])
-plt.title('beta sync map')
+    sigma=sigma_matrix_making(minimization_result,P_d_new,P_t_new,P_s_new,freq_maps)
+    for j in range(len(sigma)):
+        print(np.sqrt(sigma[j][j]))
+
+    delta_b=delta_beta_matrix_making(P_d_new,P_t_new,P_s_new,input_beta_zeroth_iteration)
+    for j in range(len(delta_b)):
+        print(np.sqrt(delta_b[j][j]))
+    comp.append(matrix_comparison(delta_b,sigma))
+
+    P_d_new,P_t_new,P_s_new,set_of_beta_slice=patch_making(input_beta_zeroth_iteration,sigma,P_d_new,P_t_new,P_s_new)
+
+i+=1
+map_b,map_t,map_s=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new)
+hp.mollview(np.array(map_b),sub=(2,2,1))
+plt.title('beta dust map iteration %s' %(i))
+hp.mollview(np.array(map_t),sub=(2,2,2))
+plt.title('dust temp map iteration %s' %(i))
+hp.mollview(np.array(map_s),sub=(2,2,3))
+plt.title('beta sync map iteration %s' %(i))
+plt.subplot(2,2,4)
+plt.plot(comp)
 plt.show()
