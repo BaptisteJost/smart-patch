@@ -1,3 +1,9 @@
+# import os
+#
+# path_to_fgbuster = '/mnt/c/Users/Baptiste/fgbuster'
+# os.sys.path.insert(0, os.path.realpath(path_to_fgbuster))
+
+
 import numpy as np
 import healpy as hp
 import pylab as py
@@ -15,7 +21,7 @@ import numdifftools
 
 
 #------------------------------------------------------SKY GENERATION----------------------------------------------------
-nside = 2
+nside = 8
 pixel_number=hp.nside2npix(nside)
 sky = get_sky(nside, 'c1d1s1')
 instrument = get_instrument(nside, 'litebird')
@@ -26,31 +32,45 @@ prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)         
 # print(freq_maps)
 
 
+
+#----------------------------------------------------NO MASK---------------------------------------------------------------------
+# mask_bin=[1]*pixel_number
+# masked_pixels=[]
+
+
+#----------------------------------------------------MASK-------------------------------------------------------------------------
 mask=hp.read_map('../map_test/HFI_Mask_GalPlane-apo2_2048_R2.00.fits',field=2)
 mask_bin=mask*0
 mask_bin=hp.ud_grade(mask_bin,nside)
 mask_bin[np.where(hp.ud_grade(mask,nside)!=0)[0]]=1
 masked_pixels=[np.where(hp.ud_grade(mask,nside)==0)[0]]
-freq_maps_save=freq_maps[:][:][:]
-freq_maps= np.empty((len(freq_maps_save), len(freq_maps_save[0]),pixel_number-len(masked_pixels[0])))
-for i in range(len(freq_maps_save)):
-    for j in range(len(freq_maps_save[i])):
-        freq_maps[i][j]=np.delete(freq_maps_save[i][j],masked_pixels)
-        # print(np.delete(freq_maps_save[i][j],masked_pixels))
+print(' number of masked_pixels',len(masked_pixels[0]))
 
-pixel_list=[]
-# print('masked_pixels=',masked_pixels[1][0])
-temp=[]
-for j in range(pixel_number):
-    for i in range(len(masked_pixels[0])):
-        if j==masked_pixels[0][i]:
-            temp.append(j)
-    if len(temp)==0:
-        pixel_list.append(j)
+#--------------------------------------------------------------------------------------------------------------------------
+freq_maps_save=freq_maps[:][:][:]
+if len(masked_pixels)!=0:
+    freq_maps= np.zeros((len(freq_maps_save), len(freq_maps_save[0]),pixel_number-len(masked_pixels[0])))
+    # print 'freq_maps test',freq_maps
+    for i in range(len(freq_maps_save)):
+        for j in range(len(freq_maps_save[i])):
+            freq_maps[i][j]=np.delete(freq_maps_save[i][j],masked_pixels)
+            # print(np.delete(freq_maps_save[i][j],masked_pixels))
+
+    pixel_list=[]
+    # print('masked_pixels=',masked_pixels[1][0])
     temp=[]
-# print('pixel_list=',pixel_list)
-pixel_number=pixel_number-len(masked_pixels[0])
-print('pixel_number=',pixel_number)
+    for j in range(pixel_number):
+        for i in range(len(masked_pixels[0])):
+            if j==masked_pixels[0][i]:
+                temp.append(j)
+        if len(temp)==0:
+            pixel_list.append(j)
+        temp=[]
+    # print('pixel_list=',pixel_list)
+    pixel_number=pixel_number-len(masked_pixels[0])
+else:
+    pixel_list=range(pixel_number)
+
 # for i in range(len(freq_maps_save)):
 #     for j in range(len(freq_maps_save[i])):
 #         freq_maps[i][j]=freq_maps_save[i][j]*mask_bin
@@ -93,11 +113,26 @@ print('pixel_number=',pixel_number)
 def data_patch(freq_maps,P_i): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
     data=[]
     temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
+    index_list=[]
     for i in range(len(P_i)):
         for f in range(len(freq_maps)):
             for s in range(len(freq_maps[0])):
                 for p in range(len(P_i[i])):
-                    temp_list[f][s].append(freq_maps[f][s][P_i[0][0]])
+                    temp_list[f][s].append(freq_maps[f][s][pixel_list.index(P_i[i][p])])
+        data.append(temp_list)# for p in range(len(meta_P[i])))
+        temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
+    del temp_list
+    return data
+
+def data_pixel(freq_maps,P_i): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
+    data=[None]*hp.nside2npix(nside)
+    temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
+    index_list=[]
+    for i in range(len(P_i)):
+        for f in range(len(freq_maps)):
+            for s in range(len(freq_maps[0])):
+                for p in range(len(P_i[i])):
+                    temp_list[f][s].append(freq_maps[f][s][pixel_list.index(P_i[i][p])])
         data.append(temp_list)# for p in range(len(meta_P[i])))
         temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
     del temp_list
@@ -110,15 +145,12 @@ def patch_map(input_set_of_betas,P_d,P_t,P_s):
     map_bd=[None]*pixel_number1
     map_bt=[None]*pixel_number1
     map_bs=[None]*pixel_number1
-    print 'P_d=',P_d
+    # print 'input_set_of_betas', input_set_of_betas
     for i in range(len(P_d)):
         for j in range(len(P_d[i])):
-            print 'P_d[%s][%s]='%(i,j),P_d[i][j]
-            print 'j=',j
             map_bd[P_d[i][j]]=input_set_of_betas[ind]
         ind+=1
-    print(pixel_list)
-    print map_bd
+
     for i in range(len(P_t)):
         for j in range(len(P_t[i])):
             map_bt[P_t[i][j]]=input_set_of_betas[ind]
@@ -127,19 +159,20 @@ def patch_map(input_set_of_betas,P_d,P_t,P_s):
     for i in range(len(P_s)):
         for j in range(len(P_s[i])):
             map_bs[P_s[i][j]]=input_set_of_betas[ind]
+        # print('index=',ind)
         ind+=1
     return map_bd,map_bt,map_bs
 
 
-def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data): #computes the joint likelihood for the whole sky taking into account the patches
+def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data,p): #computes the joint likelihood for the whole sky taking into account the patches
     #prewhiten_factors must be defined above !
     logL_spec=0
     #first we have to create the maps of beta in the sky to link each patch with its corresponding beta value
     ind=0
     pixel_number1=hp.nside2npix(nside)
-    map_bd=[0]*pixel_number1
-    map_bt=[0]*pixel_number1
-    map_bs=[0]*pixel_number1
+    map_bd=[None]*pixel_number1
+    map_bt=[None]*pixel_number1
+    map_bs=[None]*pixel_number1
     # print('len(P_d)=',len(P_d))
     # print('len(P_d[0])=',len(P_d[0]))
     # print('np.shape(input_set_of_betas)=',np.shape(input_set_of_betas))
@@ -151,65 +184,88 @@ def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data): #computes th
             # print 'j=',j
             map_bd[j]=input_set_of_betas[ind]
         ind+=1
+
     for i in range(len(P_t)):
-        for j in range(len(P_t[i])):
-            map_bt[P_t[i][j]]=input_set_of_betas[ind]
+        for j in P_t[i]:
+            map_bt[j]=input_set_of_betas[ind]
         ind+=1
 
     for i in range(len(P_s)):
-        for j in range(len(P_s[i])):
-            map_bs[P_s[i][j]]=input_set_of_betas[ind]
+        for j in P_s[i]:
+            map_bs[j]=input_set_of_betas[ind]
         ind+=1
 
-    for p in pixel_list:
-        logL_spec+=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
+    # for p in pixel_list:
+        # print(fun[p]([map_bd[p],map_bt[p],map_bs[p]]))
+    print 'fun[p]([map_bd[p],map_bt[p],map_bs[p]])',fun[p]([map_bd[p],map_bt[p],map_bs[p]])
+    print 'input_set_of_betas',input_set_of_betas
+    logL_spec=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
     del map_bd,map_bt,map_bs
     return logL_spec
 
 
-def sigma_matrix_making(minimization_result,P_d,P_t,P_s,data): #computes the sigma matrix for each patch and creates the total sigma matrix for the whole sky
+def sigma_matrix_making(minimization_result,P_d,P_t,P_s,last_values): #computes the sigma matrix for each patch and creates the total sigma matrix for the whole sky
     ind=0
     pixel_number1=hp.nside2npix(nside)
     map_bd=[None]*pixel_number1
     map_bt=[None]*pixel_number1
     map_bs=[None]*pixel_number1
-    fisher_tot=[[0 for j in range(len(minimization_result.x))]for i in range(len(minimization_result.x))]
+    fisher_tot=[[0 for j in range(len(P_d)+len(P_t)+len(P_s))]for i in range(len(P_d)+len(P_t)+len(P_s))]
     # print(fisher_tot)
     #print(fisher_tot[0][0])
+    # print 'length',len(P_d)+len(P_t)+len(P_s)
     for i in range(len(P_d)):
         for j in range(len(P_d[i])):
-            map_bd[P_d[i][j]]=minimization_result.x[ind]
+            map_bd[P_d[i][j]]=minimization_result[ind]
         ind+=1
     for i in range(len(P_t)):
         for j in range(len(P_t[i])):
-            map_bt[P_t[i][j]]=minimization_result.x[ind]
+            map_bt[P_t[i][j]]=minimization_result[ind]
         ind+=1
 
     for i in range(len(P_s)):
         for j in range(len(P_s[i])):
-            map_bs[P_s[i][j]]=minimization_result.x[ind]
+            map_bs[P_s[i][j]]=minimization_result[ind]
         ind+=1
 
     sigma_m=[]
+
     for p in pixel_list:
-        fun[p]([map_bd[p],map_bt[p],map_bs[p]])#[minimization_result.x[l*3],minimization_result.x[l*3+1],minimization_result.x[l*3+2]]
-        # u_e_v_last, A_dB_last, x_last, pw_d = last_values[p]
-        # s =fgal._Wd_svd(u_e_v_last[0], pw_d[0])
-        # print(s)
+        # print 'p test',p
+        # print 'sigma p', p
+        # fun[p]([map_bd[p],map_bt[p],map_bs[p]])#[minimization_result.x[l*3],minimization_result.x[l*3+1],minimization_result.x[l*3+2]]
+        u_e_v_last, A_dB_last, x_last, pw_d = last_values[p]
+        # print 'u_e_v_last[0][1] sigma fisher0 pixel p:%s'%p,u_e_v_last[0][1]
+        s =fgal._Wd_svd(u_e_v_last[0], pw_d[0])
+
         # if A_dB_ev is None:
         #     fisher = numdifftools.Hessian(fun)(minimization_result.x)
         # else:
-        #     fisher = fgal._fisher_logL_dB_dB_svd(u_e_v_last[0], s,
-        #                                     A_dB_last[0], comp_of_dB)
+        # print 'u_e_v_last[0][1] sigma fisher1 pixel p:%s'%p,u_e_v_last[0][1]
+        fisher = fgal._fisher_logL_dB_dB_svd(u_e_v_last[0], s,
+                                            A_dB_last[0], comp_of_dB)
 
-            # print(fisher)
+        if np.isnan(s[0][0]) or np.isnan(s[0][1]) or np.isnan(s[0][2]) or np.isnan(s[1][0]) or np.isnan(s[1][1]) or np.isnan(s[1][2]):
+            print ' /!\ NAN in S /!\ '
+            print 's',s
+            print 'u_e_v_last[0][1]',u_e_v_last[0][1]
+            print 'pw_d[0]',pw_d[0]
+        #     # print 'last_values', last_values
+        #     print 'fun',fun[p]([map_bd[p],map_bt[p],map_bs[p]])
+        #     print 'comp_of_dB', comp_of_dB
+        #     print 'u_e_v_last[0]',u_e_v_last[0]
+        #     print 'A_dB_last[0]',A_dB_last[0]
+
+
         # print([map_bd[p],map_bt[p],map_bs[p]])
         # print('u_e_v_last[0]=',u_e_v_last[0],'s=', s,'A_dB_last[0]=',A_dB_last[0],'comp_of_dB=', comp_of_dB)
         # print('numdifftools.Hessian(fun)(minimization_result.x)=',numdifftools.Hessian(fun[p])([map_bd[p],map_bt[p],map_bs[p]]))
         #
         # print('fgal._fisher_logL_dB_dB_svd(u_e_v_last[0], s, A_dB_last[0], comp_of_dB)=',fgal._fisher_logL_dB_dB_svd(u_e_v_last[0], s,A_dB_last[0], comp_of_dB))
-
-        fisher=numdifftools.Hessian(fun[p])([map_bd[p],map_bt[p],map_bs[p]])
+        # if h!=0:
+        #     fisher=np.zeros((3,3))
+        # else:
+        #     fisher=numdifftools.Hessian(fun[p])([map_bd[p],map_bt[p],map_bs[p]])
         # Sigma = np.linalg.inv(fisher)
 
         #sigma_m.append(Sigma)
@@ -248,8 +304,160 @@ def sigma_matrix_making(minimization_result,P_d,P_t,P_s,data): #computes the sig
 
         fisher_tot[len(P_d)+bt_index][len(P_d)+len(P_t)+bs_index]+=fisher[1][2]
         fisher_tot[len(P_d)+len(P_t)+bs_index][len(P_d)+bt_index]+=fisher[2][1]
+    # print(fisher_tot)
+    # print 'fisher_tot_shape',np.shape(fisher_tot)
     sigma_tot=np.linalg.inv(fisher_tot).T
     return(sigma_tot)
+
+def fisher_pixel(map_bd,map_bt,map_bs,last_values):
+    fisher_list=[None]*hp.nside2npix(nside)
+    s_q_00=[None]*hp.nside2npix(nside)
+    s_q_01=[None]*hp.nside2npix(nside)
+    s_q_02=[None]*hp.nside2npix(nside)
+    s_q_10=[None]*hp.nside2npix(nside)
+    s_q_11=[None]*hp.nside2npix(nside)
+    s_q_12=[None]*hp.nside2npix(nside)
+    for p in pixel_list:
+        fun[p]([map_bd[p],map_bt[p],map_bs[p]])#[minimization_result.x[l*3],minimization_result.x[l*3+1],minimization_result.x[l*3+2]]
+        u_e_v_last, A_dB_last, x_last, pw_d = last_values[p]
+        # print 'u_e_v_last[0][1] sigma fisher0 pixel p:%s'%p,u_e_v_last[0][1]
+        s =fgal._Wd_svd(u_e_v_last[0], pw_d[0])
+        # print 's',s
+        s_q_00[p]=s[0][0]
+        s_q_01[p]=s[0][1]
+        s_q_02[p]=s[0][2]
+        s_q_10[p]=s[1][0]
+        s_q_11[p]=s[1][1]
+        s_q_12[p]=s[1][2]
+        # if A_dB_ev is None:
+        #     fisher = numdifftools.Hessian(fun)(minimization_result.x)
+        # else:
+        # print 'u_e_v_last[0][1] sigma fisher1 pixel p:%s'%p,u_e_v_last[0][1]
+        fisher_list[p]= fgal._fisher_logL_dB_dB_svd(u_e_v_last[0], s,
+                                            A_dB_last[0], comp_of_dB)
+        if np.log(1/fisher_list[p][0][0])>0:
+            print 'fisher_list[%s][1][1]'%p,np.log(1/fisher_list[p][1][1])
+
+        if np.isnan(s[0][0]) or np.isnan(s[0][1]) or np.isnan(s[0][2]) or np.isnan(s[1][0]) or np.isnan(s[1][1]) or np.isnan(s[1][2]):
+            print ' /!\ NAN in S /!\ '
+            print 'at pixel %s'%p
+            print 's',s
+            print 'u_e_v_last[0][1]',u_e_v_last[0][1]
+            print 'pw_d[0]',pw_d[0]
+    return fisher_list,s_q_00,s_q_01,s_q_02,s_q_10,s_q_11,s_q_12
+
+
+def patch_making_pbyp(input_beta_zeroth_iteration,fisher_list):
+
+    sorted_beta_d_pixel_list=sorted (range(pixel_number),key=lambda k: input_beta_zeroth_iteration[k])
+    sorted_beta_t_pixel_list=sorted (range(pixel_number),key=lambda k: input_beta_zeroth_iteration[k+pixel_number])
+    sorted_beta_s_pixel_list=sorted (range(pixel_number),key=lambda k: input_beta_zeroth_iteration[k+pixel_number*2])
+
+    # print 'sorted beta d'
+    # for p in range(pixel_number):
+        # print 'pixel_list[sorted_beta_d_pixel_list[p]]',pixel_list[sorted_beta_d_pixel_list[p]]
+        # print 'sorted_beta_d_pixel_list[p]',sorted_beta_d_pixel_list[p]
+        # print 'p',p
+        # print input_beta_zeroth_iteration[sorted_beta_d_pixel_list[p]]
+
+    # print 'sorted beta t'
+    # for p in range(pixel_number):
+    #     print input_beta_zeroth_iteration[sorted_beta_t_pixel_list[p]+pixel_number]
+    #
+    # print 'sorted beta s'
+    # for p in range(pixel_number):
+    #     print input_beta_zeroth_iteration[sorted_beta_s_pixel_list[p]+2*pixel_number]
+
+    P_d_new=[]
+    P_t_new=[]
+    P_s_new=[]
+
+    sigma_patch_temp=0 #arbitrary
+    delta_beta_temp=1 #arbitrary
+    pixel_patch_temp=[]
+    p_list=[]
+    fisher_tot=0
+    p=0
+    # fisher_tot+=fisher_list[sorted_beta_d_pixel_list[0]] # /!\ PROBLEME CAR ON NE PEUT PAS AVOIR DE PATCH DE TAILLE UN PIXEL (OU BIEN TOUT LES PATCHES AURONT TAILLE 1 )
+    # pixel_patch_temp.append(0)
+    #
+    # print 'fisher_list[sorted_beta_d_pixel_list[82]]',fisher_list[82]
+    # print 'len fisher',len(fisher_list)
+    while p!=pixel_number:
+        # print 'pp',p
+        # print 'fisher_list[sorted_beta_d_pixel_list[p]]',fisher_list[pixel_list[sorted_beta_d_pixel_list[p]]]
+        fisher_tot+=fisher_list[pixel_list[sorted_beta_d_pixel_list[p]]]
+        pixel_patch_temp.append(pixel_list[sorted_beta_d_pixel_list[p]])
+        p_list.append(p)
+        p+=1
+        while sigma_patch_temp <= delta_beta_temp*delta_beta_temp:
+            if p==pixel_number:
+                print 'pixel limit reached'
+                break
+                print 'p',p
+            # print 'p',p
+            # print 'pixel_list[sorted_beta_d_pixel_list[p]]',pixel_list[sorted_beta_d_pixel_list[p]]
+            fisher_tot+=fisher_list[pixel_list[sorted_beta_d_pixel_list[p]]]
+
+            sigma_patch_temp=(np.linalg.inv(fisher_tot).T)[0][0]
+            pixel_patch_temp.append(pixel_list[sorted_beta_d_pixel_list[p]])
+            p_list.append(p)
+            # print '[input_beta_zeroth_iteration[x] for x in pixel_patch_temp]',[input_beta_zeroth_iteration[sorted_beta_d_pixel_list[x]] for x in p_list]
+            delta_beta_temp=np.std([input_beta_zeroth_iteration[x] for x in pixel_patch_temp])
+            # print 'db^2=',delta_beta_temp*delta_beta_temp
+            # print 'sigma=',sigma_patch_temp
+            p+=1
+
+        print 'NEW PATCH !'
+        P_d_new.append(pixel_patch_temp)
+        pixel_patch_temp=[]
+        p_list=[]
+        sigma_patch_temp=0 #arbitrary
+        delta_beta_temp=1 #arbitrary
+        fisher_tot=0
+    print 'OUT OF THE LOOP'
+    return P_d_new
+
+
+# def sigma_addition(fisher_list,P_d,P_t,P_s):
+#     for p in :
+#         for i in range(len(P_d)):
+#             try:
+#                 P_d[i].index(p)
+#                 bd_index=i
+#             except:
+#                 pass
+#
+#         for i in range(len(P_t)):
+#             try:
+#                 P_t[i].index(p)
+#                 bt_index=i
+#             except:
+#                 pass
+#
+#         for i in range(len(P_s)):
+#             try:
+#                 P_s[i].index(p)
+#                 bs_index=i
+#             except:
+#                 pass
+#
+#         fisher_tot[bd_index][bd_index]+=fisher_list[p][0][0]
+#         fisher_tot[len(P_d)+bt_index][len(P_d)+bt_index]+=fisher_list[p][1][1]
+#         fisher_tot[len(P_d)+len(P_t)+bs_index][len(P_d)+len(P_t)+bs_index]+=fisher_list[p][2][2]
+#
+#         fisher_tot[bd_index][len(P_d)+bt_index]+=fisher_list[p][0][1]
+#         fisher_tot[len(P_d)+bt_index][bd_index]+=fisher_list[p][1][0]
+#
+#         fisher_tot[bd_index][len(P_d)+len(P_t)+bs_index]+=fisher_list[p][0][2]
+#         fisher_tot[len(P_d)+len(P_t)+bs_index][bd_index]+=fisher_list[p][2][0]
+#
+#         fisher_tot[len(P_d)+bt_index][len(P_d)+len(P_t)+bs_index]+=fisher_list[p][1][2]
+#         fisher_tot[len(P_d)+len(P_t)+bs_index][len(P_d)+bt_index]+=fisher_list[p][2][1]
+#     # print(fisher_tot)
+#     # print 'fisher_tot_shape',np.shape(fisher_tot)
+#     sigma_tot=np.linalg.inv(fisher_tot).T
+#     return(sigma_tot)
 
 
 def delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration): #computes the spatial delta over the betas in a patch
@@ -372,11 +580,11 @@ def patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s):   # patch makin
     if len(temp_list2) >=1:
         print('not enough patches for P_t')
         P_t_new.append(temp_list2)
-        temp_list3=[0]*len(temp_list2)
+        temp_list3=[]
         index_list=[]
         for j in range(len(temp_list2)):
             index_list.append(pixel_list.index(temp_list2[j]))
-            temp_list3[j]=index_list[j]+pixel_number
+            temp_list3.append(index_list[j]+pixel_number)
         min_beta_t_in_list=np.amin(np.take(input_beta_zeroth_iteration,temp_list3))
         max_beta_t_in_list=np.amax(np.take(input_beta_zeroth_iteration,temp_list3))
         set_of_beta_slice.append((min_beta_t_in_list+max_beta_t_in_list)/2)
@@ -398,6 +606,7 @@ def patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s):   # patch makin
             P_s_new.append(temp_list2)
             set_of_beta_slice.append((inf_boundary_s+sup_boundary_s)/2)
         temp_list2=[]
+
         inf_boundary_s=inf_boundary_s+np.sqrt(sigma[j+len(P_d)+len(P_t)][j+len(P_d)+len(P_t)])
         sup_boundary_s=sup_boundary_s+np.sqrt(sigma[j+1+len(P_d)+len(P_t)][j+1+len(P_d)+len(P_t)])
 
@@ -409,13 +618,15 @@ def patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s):   # patch makin
     if len(temp_list2) >=1:
         print('not enough patches for P_s')
         P_s_new.append(temp_list2)
-        temp_list3=[0]*len(temp_list2)
+        temp_list3=[]
         index_list=[]
         for j in range(len(temp_list2)):
             index_list.append(pixel_list.index(temp_list2[j]))
-            temp_list3[j]=index_list[j]+pixel_number
+            temp_list3.append(index_list[j]+2*pixel_number)
         min_beta_s_in_list=np.amin(np.take(input_beta_zeroth_iteration,temp_list3))
         max_beta_s_in_list=np.amax(np.take(input_beta_zeroth_iteration,temp_list3))
+        print('inf_boundary_s_in_list',min_beta_s_in_list)
+        print('sup_boundary_s_in_list',max_beta_s_in_list)
         set_of_beta_slice.append((min_beta_s_in_list+max_beta_s_in_list)/2)
         index_list=[]
         del temp_list3
@@ -470,12 +681,12 @@ def patch_making_mean(input_beta_zeroth_iteration,sigma,minimization_result,P_d,
 
     for j in range(len(P_d)):
         for i in range(pixel_number):
-            if input_beta_zeroth_iteration[i]>minimization_result.x[j]-sigma[j][j]/2 and input_beta_zeroth_iteration[i]<minimization_result.x[j]+sigma[j][j]/2:
-                beta_dust_slice[i]=minimization_result.x[j]
+            if input_beta_zeroth_iteration[i]>minimization_result[j]-sigma[j][j]/2 and input_beta_zeroth_iteration[i]<minimization_result[j]+sigma[j][j]/2:
+                beta_dust_slice[i]=minimization_result[j]
                 temp_list2.append(i)
         if len(temp_list2) >= 1:
             P_d_new.append(temp_list2)
-            set_of_beta_slice.append(minimization_result.x[j])
+            set_of_beta_slice.append(minimization_result[j])
     for i in range(len(P_d)-1):
         for j in range(len(P_d[i])):
             for k in range(len(P_d[i+1])):
@@ -554,10 +765,11 @@ def patch_making_mean(input_beta_zeroth_iteration,sigma,minimization_result,P_d,
 P_d=[]
 P_s=[]
 P_t=[]
+h=0
 for i in range(len(freq_maps[0][1])): P_d.append([pixel_list[i]])
 for i in range(len(freq_maps[0][1])): P_s.append([pixel_list[i]])
 for i in range(len(freq_maps[0][1])): P_t.append([pixel_list[i]])
-print('P_d first=',P_d)
+# print('P_d first=',P_d)
 # P_d=pixel_list[:]
 # P_s=pixel_list[:]
 # P_t=pixel_list[:]
@@ -572,44 +784,104 @@ for i in range(len(freq_maps[0][0])):
     input_set_of_betas.append(-3.1)
 
 
+bounds=((1,1.7),(15,25),(-3.4,-2.8))
+
+
 
 fun=[]
 last_values=[]
 data=data_patch(freq_maps,P_d)
 A_ev, A_dB_ev, comp_of_param, x0, params = _A_evaluators(components, instrument, prewhiten_factors=prewhiten_factors)
+# print 'A_ev(0)',A_ev(0)
+print 'A_ev',A_ev
 #A_local=A_ev(beta_pix)
+print 'A_dB_ev',A_dB_ev
 A_dB_ev, comp_of_dB = fgal._A_dB_ev_and_comp_of_dB_as_compatible_list(A_dB_ev, comp_of_param, x0)
+print 'A_dB_ev',A_dB_ev
 
 # for i in pixel_list:
 print('pixel_number=',pixel_number)
-print('data shape=',np.shape(data[pixel_number-1]))
+print('data shape=',np.shape(data))
+print('data[0] transpose shape',np.shape(np.transpose(data[0])))
+print('freq_maps shape',np.shape(np.transpose(freq_maps)[0]))
+print('freq_maps shape',np.shape(freq_maps))
 # print('data shape=',np.shape(data[pixel_number]))
 # print i
 fun=[None]*hp.nside2npix(nside)
 last_values=[None]*hp.nside2npix(nside)
 for l in range(pixel_number):
-     prewhitened_data = prewhiten_factors * np.transpose(data[l])
+     prewhitened_data = prewhiten_factors * np.transpose(freq_maps)[l]
      funtemp, jactemp, last_valuestemp = fgal._build_bound_inv_logL_and_logL_dB(A_ev, prewhitened_data,np.diag(prewhiten_factors) , A_dB_ev, comp_of_param)
      fun[pixel_list[l]]=funtemp
      last_values[pixel_list[l]]=last_valuestemp
+     # print 'uev pixel:%s'%l,last_values[0]
      del funtemp, jactemp,last_valuestemp
-
+print 'fun',fun[0]
 
 # for p in range(hp.nside2npix(nside)):
 #     funtemp, jactemp, last_valuestemp = fgal._build_bound_inv_logL_and_logL_dB(A_ev, prewhitened_data,np.diag(prewhiten_factors) , A_dB_ev, comp_of_param)
 #     fun.append(funtemp)
 #     last_values.append(last_valuestemp)
 #     print(funtemp([1.59,19.6,-3.1]))
+
 comp=[]
-minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,input_set_of_betas,(P_d,P_t,P_s,freq_maps))
-# print(minimization_result)
-# print('newbeta=',minimization_result.x)
-input_beta_zeroth_iteration=minimization_result.x
-print(input_beta_zeroth_iteration)
-sigma=sigma_matrix_making(minimization_result,P_d,P_t,P_s,freq_maps)
-print'sigma_d_iter0='
+minimization_result_pixel=[]
+input_beta_zeroth_iteration=[]
+for p in range(pixel_number):
+    minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]]),bounds=bounds).x)
+
+
+for i in range(pixel_number):
+    input_beta_zeroth_iteration.append(minimization_result_pixel[i][0])
+for i in range(pixel_number):
+    input_beta_zeroth_iteration.append(minimization_result_pixel[i][1])
+for i in range(pixel_number):
+    input_beta_zeroth_iteration.append(minimization_result_pixel[i][2])
+minimization_result_pixel=[]
+
+# input_beta_zeroth_iteration=minimization_result.x
+
+# print 'minimisation results pixel 0',input_beta_zeroth_iteration[0],input_beta_zeroth_iteration[pixel_number],input_beta_zeroth_iteration[pixel_number*2]
+# azert
+map_bd,map_bt,map_bs=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s)
+fisher_list,s_q_00,s_q_01,s_q_02,s_q_10,s_q_11,s_q_12=fisher_pixel(map_bd,map_bt,map_bs,last_values)
+P_d_test=patch_making_pbyp(input_beta_zeroth_iteration,fisher_list)
+print 'P_d_test shape',np.shape(P_d_test)
+# azertyuiops
+# print 's_q_d',s_q_d
+hp.mollview(np.array(s_q_00))
+plt.title('s[0][0]')
+plt.show()
+
+hp.mollview(np.array(s_q_01))
+plt.title('s[0][1]')
+plt.show()
+
+hp.mollview(np.array(s_q_02))
+plt.title('s[0][2]')
+plt.show()
+
+hp.mollview(np.array(s_q_10))
+plt.title('s[1][0]')
+plt.show()
+
+hp.mollview(np.array(s_q_11))
+plt.title('s[1][1]')
+plt.show()
+
+hp.mollview(np.array(s_q_12))
+plt.title('s[1][2]')
+plt.show()
+
+
+# print 'u_e_v_last[0][1] sigma fisher2',last_values[0][0]
+sigma=sigma_matrix_making(input_beta_zeroth_iteration,P_d,P_t,P_s,last_values)
+# print 'u_e_v_last[0][1] sigma fisher3',last_values[0][0]
+print'sigma_t_iter0='
 for j in range(len(P_t)):
-    print np.sqrt(sigma[j+len(P_d)][j+len(P_d)])
+    if np.sqrt(sigma[j+len(P_d)][j+len(P_d)])>=1:
+        print 'p',j
+        print np.sqrt(sigma[j+len(P_d)][j+len(P_d)])
 # print('sigma=')
 # for i in range(len(sigma)):
 #     print(np.sqrt(sigma[i][i]))
@@ -620,9 +892,78 @@ a=delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration)
 comp.append(matrix_comparison(a,sigma))
 # print('matrix comparison=',comp[0])
 # print('input_beta_zeroth_iteration=',input_beta_zeroth_iteration)
-print('P_d bla=',P_d)
+map_b1,map_t1,map_s1=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s)
+map_b=[]
+map_t=[]
+map_s=[]
+map_b=map_b1[:]
+map_t=map_t1[:]
+map_s=map_s1[:]
+map_b1=[]
+map_t1=[]
+map_s1=[]
+sigma_list=[]
+
+i=0
+hp.mollview(np.array(map_b),sub=(2,2,1),min=bounds[0][0],max=bounds[0][1])
+plt.title('beta dust map iteration %s' %(i))
+hp.mollview(np.array(map_t),sub=(2,2,2),min=bounds[1][0],max=bounds[1][1])
+plt.title('dust temp map iteration %s' %(i))
+hp.mollview(np.array(map_s),sub=(2,2,3),min=bounds[2][0],max=bounds[2][1])
+plt.title('beta sync map iteration %s' %(i))
+plt.subplot(2,2,4)
+plt.plot(comp)
+plt.title('Evolution of the norm over iterations')
+# plt.savefig('iteration=%s'%i)
+plt.show()
+# plt.close()
+sigma_list.append(np.linalg.norm(sigma))
+
+
+sigma_d_map,sigma_t_map,sigma_s_map=patch_map(sigma.diagonal(0),P_d,P_t,P_s)
+for i in range(len(sigma_d_map)):
+    if sigma_d_map[i]==None:
+        sigma_d_map[i]=0
+for i in range(len(sigma_t_map)):
+    if sigma_t_map[i]==None:
+        sigma_t_map[i]=0
+for i in range(len(sigma_s_map)):
+    if sigma_s_map[i]==None:
+        sigma_s_map[i]=0
+
+i=0
+
+print 'sigma.diagonal(0)',sigma.diagonal(0)
+print 'sigma.diagonal(0) shape',np.shape(sigma.diagonal(0))
+print 'beta zeroth iter shape',np.shape(input_beta_zeroth_iteration)
+print 'sigma d map shape',np.shape(sigma_d_map)
+print 'sigma t map shape',np.shape(sigma_t_map)
+print 'sigma s map shape',np.shape(sigma_s_map)
+print 'beta d map shape', np.shape(map_b)
+print 'beta t map shape', np.shape(map_t)
+print 'beta s map shape', np.shape(map_s)
+
+for i in range(len(sigma_d_map)):
+    if np.log(np.array(sigma_d_map))[i]>0:
+        print 'np.log(np.array(sigma_d_map))[%s]'%i,np.log(np.array(sigma_d_map))[i]
+
+hp.mollview(np.log(np.array(sigma_d_map)),sub=(2,2,1))
+plt.title('sigma^2 beta dust map iteration %s' %(i))
+hp.mollview(np.log(np.array(sigma_t_map)),sub=(2,2,2))
+plt.title('sigma^2 dust temp map iteration %s' %(i))
+hp.mollview(np.log(np.array(sigma_s_map)),sub=(2,2,3))
+plt.title('sigma^2 beta sync map iteration %s' %(i))
+plt.show()
+
+# print 'np.log(np.array(sigma_d_map)',np.log(np.array(sigma_d_map))
+# print 's_q_d',s_q_d
+
+
+
+
+# print('P_d bla=',P_d)
 P_d_new,P_t_new,P_s_new,set_of_beta_slice=patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s)
-print('P_d_new=',P_d_new)
+# print('P_d_new=',P_d_new)
 # print('P_d_new=',P_d_new)
 # print('P_t_new=',P_t_new)
 # print('P_s_new=',P_s_new)
@@ -652,7 +993,11 @@ sigma_list=[]
 #     # del templist5
 # plt.show()
 
+
+
+
 i=0
+h=1
 # while comp[i]>0.00021:
 for i in range(10):
     map_b1,map_t1,map_s1=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new)
@@ -665,48 +1010,59 @@ for i in range(10):
     map_b1=[]
     map_t1=[]
     map_s1=[]
-    print'sigma'
-    for j in range(len(P_d_new)+len(P_t_new)+len(P_s_new)):
-        print np.sqrt(sigma[j][j])
+    index_list=[]
+    temp_list5=[]
+
+    # print'sigma'
+    # for j in range(len(P_d_new)+len(P_t_new)+len(P_s_new)):
+    #     print np.sqrt(sigma[j][j])
+
 
     binsd=np.linspace(np.amin(input_beta_zeroth_iteration[:pixel_number]),np.amax(input_beta_zeroth_iteration[:pixel_number]),pixel_number)
     for j in range(len(P_d_new)):
-        templist5=[x for x in range(len(P_d_new[j]))]
-        # print 'templist5=',templist5
+        for l in range(len(P_d_new[j])):
+            index_list.append(pixel_list.index(P_d_new[j][l]))
         # print [x for x in input_beta_zeroth_iteration[templist5]]
-        plt.hist([x for x in input_beta_zeroth_iteration[templist5]],binsd)
-        templist5=[]
+        plt.hist([x for x in np.array(input_beta_zeroth_iteration)[index_list]],binsd)
+        index_list=[]
     # plt.savefig('Bd_histo_iteration=%s'%i)
     plt.title('B_d histogram iteration=%s'%i)
     plt.show()
+
+
+
     binst=np.linspace(np.amin(input_beta_zeroth_iteration[pixel_number:2*pixel_number]),np.amax(input_beta_zeroth_iteration[pixel_number:2*pixel_number]),pixel_number)
     for j in range(len(P_t_new)):
-        templist5=[x+pixel_number for x in range(len(P_t_new[j]))]
-        # print 'templist5=',templist5
+        for l in range(len(P_t_new[j])):
+            index_list.append(pixel_list.index(P_t_new[j][l]))
+            temp_list5.append(index_list[l]+pixel_number)
         # print [x for x in input_beta_zeroth_iteration[templist5]]
-        plt.hist([x for x in input_beta_zeroth_iteration[templist5]],binst)
-        templist5=[]
+        plt.hist([x for x in np.array(input_beta_zeroth_iteration)[temp_list5]],binst)
+        temp_list5=[]
+        index_list=[]
     # plt.savefig('Bt_histo_iteration=%s'%i)
     plt.title('B_t histogram iteration=%s'%i)
     plt.show()
 
     binss=np.linspace(np.amin(input_beta_zeroth_iteration[2*pixel_number:3*pixel_number]),np.amax(input_beta_zeroth_iteration[2*pixel_number:3*pixel_number]),pixel_number)
     for j in range(len(P_s_new)):
-        templist5=[x+2*pixel_number for x in range(len(P_s_new[j]))]
-        # print 'templist5=',templist5
+        for l in range(len(P_s_new[j])):
+            index_list.append(pixel_list.index(P_s_new[j][l]))
+            temp_list5.append(index_list[l]+2*pixel_number)
         # print [x for x in input_beta_zeroth_iteration[templist5]]
-        plt.hist([x for x in input_beta_zeroth_iteration[templist5]],binss)
-        templist5=[]
+        plt.hist([x for x in np.array(input_beta_zeroth_iteration)[temp_list5]],binss)
+        temp_list5=[]
+        index_list=[]
     # plt.savefig('Bs_histo_iteration=%s'%i)
     plt.title('B_s histogram iteration=%s'%i)
     plt.show()
 
 
-    hp.mollview(np.array(map_b),sub=(2,2,1))
+    hp.mollview(np.array(map_b),sub=(2,2,1),min=bounds[0][0],max=bounds[0][1])
     plt.title('beta dust map iteration %s' %(i))
-    hp.mollview(np.array(map_t),sub=(2,2,2))
+    hp.mollview(np.array(map_t),sub=(2,2,2),min=bounds[1][0],max=bounds[1][1])
     plt.title('dust temp map iteration %s' %(i))
-    hp.mollview(np.array(map_s),sub=(2,2,3))
+    hp.mollview(np.array(map_s),sub=(2,2,3),min=bounds[2][0],max=bounds[2][1])
     plt.title('beta sync map iteration %s' %(i))
     plt.subplot(2,2,4)
     plt.plot(comp)
@@ -716,9 +1072,34 @@ for i in range(10):
     # plt.close()
     sigma_list.append(np.linalg.norm(sigma))
 
-    minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,freq_maps))
 
-    sigma=sigma_matrix_making(minimization_result,P_d_new,P_t_new,P_s_new,freq_maps)
+    sigma_d_map,sigma_t_map,sigma_s_map=patch_map(sigma.diagonal(0),P_d_new,P_t_new,P_s_new)
+
+    hp.mollview(np.array(sigma_d_map),sub=(2,2,1))
+    plt.title('sigma^2 beta dust map iteration %s' %(i))
+    hp.mollview(np.array(sigma_t_map),sub=(2,2,2))
+    plt.title('sigma^2 dust temp map iteration %s' %(i))
+    hp.mollview(np.array(sigma_s_map),sub=(2,2,3))
+    plt.title('sigma^2 beta sync map iteration %s' %(i))
+    plt.show()
+
+
+    # minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,freq_maps))
+    minimization_result_pixel=[]
+    minimization_result=[]
+    for p in range(pixel_number):
+        print 'p',p
+        minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]]),bounds=bounds).x)
+    for j in range(pixel_number):
+        minimization_result.append(minimization_result_pixel[j][0])
+    for j in range(pixel_number):
+        minimization_result.append(minimization_result_pixel[j][1])
+    for j in range(pixel_number):
+        minimization_result.append(minimization_result_pixel[j][2])
+    minimization_result_pixel=[]
+
+
+    sigma=sigma_matrix_making(minimization_result,P_d_new,P_t_new,P_s_new,last_values)
     # for j in range(len(sigma)):
     #     print(np.sqrt(sigma[j][j]))
     delta_b=delta_beta_matrix_making(P_d_new,P_t_new,P_s_new,input_beta_zeroth_iteration)
@@ -729,6 +1110,7 @@ for i in range(10):
     # print('set_of_beta_slice1=',set_of_beta_slice)
     set_of_beta_slice=[]
     P_d_new1,P_t_new1,P_s_new1,set_of_beta_slice1=patch_making(input_beta_zeroth_iteration,sigma,P_d_new,P_t_new,P_s_new)
+    print('set_of_beta_slice1=',set_of_beta_slice1)
     P_d_new=[]
     P_t_new=[]
     P_s_new=[]
@@ -751,11 +1133,11 @@ sigma_list.append(np.linalg.norm(sigma))
 # print(smart)
 # print(smart[1])
 map_b,map_t,map_s=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new)
-hp.mollview(np.array(map_b),sub=(2,2,1))
+hp.mollview(np.array(map_b),sub=(2,2,1),min=bounds[0][0],max=bounds[0][1])
 plt.title('beta dust map iteration %s' %(i))
-hp.mollview(np.array(map_t),sub=(2,2,2))
+hp.mollview(np.array(map_t),sub=(2,2,2),min=bounds[1][0],max=bounds[1][1])
 plt.title('dust temp map iteration %s' %(i))
-hp.mollview(np.array(map_s),sub=(2,2,3))
+hp.mollview(np.array(map_s),sub=(2,2,3),min=bounds[2][0],max=bounds[2][1])
 plt.title('beta sync map iteration %s' %(i))
 plt.subplot(2,2,4)
 plt.plot(comp)
