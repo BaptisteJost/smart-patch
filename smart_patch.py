@@ -335,7 +335,8 @@ def fisher_pixel(map_bd,map_bt,map_bs):
         # print 'u_e_v_last[0][1] sigma fisher0 pixel p:%s'%p,u_e_v_last[0][1]
 
         # s =fgal._Wd_svd(u_e_v_last[0], pw_d[0])
-        s=fgal.Wd(A_ev([map_bd[p],map_bt[p],map_bs[p]]),np.transpose(freq_maps)[i], np.diag(prewhiten_factors**2), return_svd=False)
+        prewhitened_data = prewhiten_factors * np.transpose(freq_maps)[i]
+        s=fgal.Wd(A_ev([map_bd[p],map_bt[p],map_bs[p]]),prewhitened_data, None, return_svd=False)
         i+=1
         # print '_invAtNA_svd(u_e_v_last[0])',fgal._invAtNA_svd(u_e_v_last[0])
         # print 's-n',s-fgal._invAtNA_svd(u_e_v_last[0])
@@ -354,7 +355,7 @@ def fisher_pixel(map_bd,map_bt,map_bs):
         # fisher_list[p]= fgal._fisher_logL_dB_dB_svd(u_e_v_last[0], s, A_dB_last[0], comp_of_dB)# - fgal._fisher_logL_dB_dB_svd(u_e_v_last[0],fgal._invAtNA_svd(u_e_v_last[0]),A_dB_last[0], comp_of_dB)
 
         # fisher_list_N[p]=
-        fisher_list[p]=fgal.fisher_logL_dB_dB(A_ev([map_bd[p],map_bt[p],map_bs[p]]), s, A_dB_ev([map_bd[p],map_bt[p],map_bs[p]]), comp_of_dB, np.diag(prewhiten_factors**2), return_svd=False)
+        fisher_list[p]=fgal.fisher_logL_dB_dB(A_ev([map_bd[p],map_bt[p],map_bs[p]]), s, A_dB_ev([map_bd[p],map_bt[p],map_bs[p]]), comp_of_dB, None, return_svd=False)
         s_q_00[p]=s.T[0][0]
         s_q_10[p]=s.T[1][0]
         s_q_20[p]=s.T[2][0]
@@ -746,8 +747,8 @@ def patch_making_mean(input_beta_zeroth_iteration,sigma,minimization_result,P_d,
     return 0
 
 
-def return_fun(pixel):
-    return lambda x: -fgal.logL(A_ev(x), np.transpose(freq_maps)[pixel],np.diag(prewhiten_factors**2))
+def return_fun(pixel,prewhitened_data):
+    return lambda x: -fgal.logL(A_ev(x), prewhitened_data,None)
 
 #--------------------------------------TEST------------------------------------------
 #
@@ -824,7 +825,7 @@ for i in range(len(freq_maps[0][0])):
 # bounds=((0.5,2.5),(0.1,None),(-8,4))
 # bounds=((0,10),(0,25),(-10,0))
 # bounds=((0,None),(0,None),(None,0))
-bounds=((1,8),(15,25),(-8,-0.05))
+bounds=((1,8),(10,30),(-8,-0.05))
 
 
 fun=[]
@@ -853,11 +854,11 @@ fun=[None]*hp.nside2npix(nside)
 last_values=[None]*hp.nside2npix(nside)
 
 for l in range(pixel_number):
-     # prewhitened_data = prewhiten_factors * np.transpose(freq_maps)[l]
+     prewhitened_data = prewhiten_factors * np.transpose(freq_maps)[l]
      # print 'np.transpose(freq_maps)[%s]'%l,np.transpose(freq_maps)[l]
      # fun[pixel_list[l]] = lambda x: -fgal.logL(A_ev(x), np.transpose(freq_maps)[l],np.diag(prewhiten_factors**2))#np.transpose(freq_maps)[l], np.diag(prewhiten_factors**2))
      # fun_test.append(lambda x: -fgal.logL(A_ev(x), np.transpose(freq_maps)[l],np.diag(prewhiten_factors**2)))
-     fun[pixel_list[l]] = return_fun(l)
+     fun[pixel_list[l]] = return_fun(l,prewhitened_data)
      # print 'fun',fun
      # print 'fun[pixel_list[l]]',fun[pixel_list[l]]([input_set_of_betas[150],input_set_of_betas[150+pixel_number],input_set_of_betas[150+2*pixel_number]])
      # last_values[pixel_list[l]]=last_valuestemp
