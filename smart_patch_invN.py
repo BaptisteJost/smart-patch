@@ -116,7 +116,7 @@ else:
 
 
 
-def data_patch(freq_maps,P_i): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
+def data_patch(freq_maps,P_i,pixel_list): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
     data=[]
     temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
     index_list=[]
@@ -130,7 +130,7 @@ def data_patch(freq_maps,P_i): #this function returns the data corresponding to 
     del temp_list
     return data
 
-def data_pixel(freq_maps,P_i): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
+def data_pixel(freq_maps,P_i,nside,pixel_list): #this function returns the data corresponding to the pixels in the input patch. Works for patches as well as for meta patches
     data=[None]*hp.nside2npix(nside)
     temp_list=[[[]for k in range(len(freq_maps[0]))] for i in range(len(freq_maps))]
     index_list=[]
@@ -145,7 +145,7 @@ def data_pixel(freq_maps,P_i): #this function returns the data corresponding to 
     return data
 
 
-def patch_map(input_set_of_betas,P_d,P_t,P_s):
+def patch_map(input_set_of_betas,P_d,P_t,P_s,nside):
     ind=0
     pixel_number1=hp.nside2npix(nside)
     map_bd=[None]*pixel_number1
@@ -170,7 +170,7 @@ def patch_map(input_set_of_betas,P_d,P_t,P_s):
     return map_bd,map_bt,map_bs
 
 
-def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data,p): #computes the joint likelihood for the whole sky taking into account the patches
+def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,nside): #computes the joint likelihood for the whole sky taking into account the patches
     #prewhiten_factors must be defined above !
     logL_spec=0
     #first we have to create the maps of beta in the sky to link each patch with its corresponding beta value
@@ -205,7 +205,8 @@ def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,data,p): #computes 
         # print(fun[p]([map_bd[p],map_bt[p],map_bs[p]]))
     # print 'fun[p]([map_bd[p],map_bt[p],map_bs[p]])',fun[p]([map_bd[p],map_bt[p],map_bs[p]])
     # print 'input_set_of_betas',input_set_of_betas
-    logL_spec=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
+    for p in range(hp.nside2npix(nside))
+        logL_spec=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
     del map_bd,map_bt,map_bs
     return logL_spec
 
@@ -315,7 +316,7 @@ def sigma_matrix_making(minimization_result,P_d,P_t,P_s,last_values): #computes 
     sigma_tot=np.linalg.inv(fisher_tot).T
     return(sigma_tot)
 
-def fisher_pixel(map_bd,map_bt,map_bs):
+def fisher_pixel(map_bd,map_bt,map_bs,fun,Hessian=False):
     fisher_list=[None]*hp.nside2npix(nside)
     # fisher_list_N=[None]*hp.nside2npix(nside)
     s_q_00=[None]*hp.nside2npix(nside)
@@ -328,6 +329,7 @@ def fisher_pixel(map_bd,map_bt,map_bs):
     nnt_list=[None]*hp.nside2npix(nside)
     fisher_s_list=[None]*hp.nside2npix(nside)
     fisher_n_list=[None]*hp.nside2npix(nside)
+    fisher_hess_list=[None]*hp.nside2npix(nside)
     i=0
     for p in pixel_list:
         # fun[p]([map_bd[p],map_bt[p],map_bs[p]])#[minimization_result.x[l*3],minimization_result.x[l*3+1],minimization_result.x[l*3+2]]
@@ -336,7 +338,7 @@ def fisher_pixel(map_bd,map_bt,map_bs):
 
         # s =fgal._Wd_svd(u_e_v_last[0], pw_d[0])
         s=fgal.Wd(A_ev([map_bd[p],map_bt[p],map_bs[p]]),np.transpose(freq_maps)[i], np.diag(prewhiten_factors**2), return_svd=False)
-        i+=1
+
         # print '_invAtNA_svd(u_e_v_last[0])',fgal._invAtNA_svd(u_e_v_last[0])
         # print 's-n',s-fgal._invAtNA_svd(u_e_v_last[0])
         # print '_invAtNA_svd(u_e_v_last[0]) shape', np.shape(fgal._invAtNA_svd(u_e_v_last[0]))
@@ -347,7 +349,9 @@ def fisher_pixel(map_bd,map_bt,map_bs):
         # fisher_s_list[p]=fgal._fisher_logL_dB_dB_svd(u_e_v_last[0], s, A_dB_last[0], comp_of_dB)
         # fisher_n_list[p]=fgal._fisher_logL_dB_dB_svd(u_e_v_last[0],fgal._invAtNA_svd(u_e_v_last[0]),A_dB_last[0], comp_of_dB)
         # if A_dB_ev is None:
-        #     fisher = numdifftools.Hessian(fun)(minimization_result.x)
+        if Hessian == True:
+            fisher_hess_list[p] = numdifftools.Hessian(fun[p])([map_bd[p],map_bt[p],map_bs[p]])
+        i+=1
         # else:
         # print 'u_e_v_last[0][1] sigma fisher1 pixel p:%s'%p,u_e_v_last[0][1]
 
@@ -374,6 +378,8 @@ def fisher_pixel(map_bd,map_bt,map_bs):
             print 's',s
             print 'u_e_v_last[0][1]',u_e_v_last[0][1]
             print 'pw_d[0]',pw_d[0]
+    if Hessian==True:
+        return fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list,fisher_hess_list
     return fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list
 
 
@@ -393,7 +399,7 @@ def patch_making_pbyp(input_beta_zeroth_iteration,fisher_list):
     print 'sorted beta t'
     for p in range(pixel_number):
         print input_beta_zeroth_iteration[sorted_beta_t_pixel_list[p]+pixel_number]
-    
+
     print 'sorted beta s'
     for p in range(pixel_number):
         print input_beta_zeroth_iteration[sorted_beta_s_pixel_list[p]+2*pixel_number]
@@ -401,6 +407,13 @@ def patch_making_pbyp(input_beta_zeroth_iteration,fisher_list):
     P_d_new=[]
     P_t_new=[]
     P_s_new=[]
+    sigma_patch_list=[]
+
+    beta2_patch_list=[]
+
+
+
+    #-----------------------------------------------------------------------------------P_d_new--------------------------------------------------------------------
 
     sigma_patch_temp=0 #arbitrary
     delta_beta_temp=0.0 #arbitrary
@@ -440,23 +453,127 @@ def patch_making_pbyp(input_beta_zeroth_iteration,fisher_list):
             pixel_patch_temp.append(pixel_list[sorted_beta_d_pixel_list[p]])
             p_list.append(p)
             # print '[input_beta_zeroth_iteration[x] for x in pixel_patch_temp]',[input_beta_zeroth_iteration[sorted_beta_d_pixel_list[x]] for x in p_list]
-            delta_beta_temp=np.std([input_beta_zeroth_iteration[x] for x in pixel_patch_temp])
-            print 'db^2=',delta_beta_temp*delta_beta_temp
-            print 'sigma=',sigma_patch_temp
+            # print 'p_list',p_list
+            # print '[sorted_beta_d_pixel_list[x] for x in p_list]',[sorted_beta_d_pixel_list[x] for x in p_list]
+            # print '[input_beta_zeroth_iteration[sorted_beta_d_pixel_list[x]] for x in p_list]',[input_beta_zeroth_iteration[sorted_beta_d_pixel_list[x]] for x in p_list]
+            delta_beta_temp=np.std([input_beta_zeroth_iteration[sorted_beta_d_pixel_list[x]] for x in p_list])
+            # print 'db^2=',delta_beta_temp*delta_beta_temp
+            # print 'sigma=',sigma_patch_temp
             p+=1
 
         patchnum+=1
-        print 'NEW PATCH ! patch number=',patchnum
+        print 'NEW d PATCH ! patch number=',patchnum
+
         P_d_new.append(pixel_patch_temp)
+        sigma_patch_list.append(sigma_patch_temp)
+        beta2_patch_list.append(delta_beta_temp*delta_beta_temp)
         pixel_patch_temp=[]
         p_list=[]
         sigma_patch_temp=0 #arbitrary
         delta_beta_temp=0.0 #arbitrary
         fisher_tot=0
 
+    #-----------------------------------------------------------------------------------P_t_new--------------------------------------------------------------------
 
-    print 'OUT OF THE LOOP'
-    return P_d_new
+    sigma_patch_temp=0 #arbitrary
+    delta_beta_temp=0.0 #arbitrary
+    pixel_patch_temp=[]
+    p_list=[]
+    patch_list=[]
+    fisher_tot=0
+    p=0
+    patchnum=1
+    while p!=pixel_number:
+        # print 'pp',p
+        # print 'fisher_list[sorted_beta_d_pixel_list[p]]',fisher_list[pixel_list[sorted_beta_d_pixel_list[p]]]
+        fisher_tot+=fisher_list[pixel_list[sorted_beta_t_pixel_list[p]]]
+        pixel_patch_temp.append(pixel_list[sorted_beta_t_pixel_list[p]])
+        p_list.append(p)
+        sigma_patch_temp=(np.linalg.inv(fisher_tot))[0][0]
+
+        p+=1
+        while sigma_patch_temp >= delta_beta_temp*delta_beta_temp:
+            if p==pixel_number:
+                print 'pixel limit reached'
+                print 'p',p
+                break
+
+            # print 'p',p
+            # print 'pixel_list[sorted_beta_d_pixel_list[p]]',pixel_list[sorted_beta_d_pixel_list[p]]
+            fisher_tot+=fisher_list[pixel_list[sorted_beta_t_pixel_list[p]]]
+
+            sigma_patch_temp=(np.linalg.inv(fisher_tot))[0][0]
+            pixel_patch_temp.append(pixel_list[sorted_beta_t_pixel_list[p]])
+            p_list.append(p)
+            # print '[input_beta_zeroth_iteration[x] for x in pixel_patch_temp]',[input_beta_zeroth_iteration[sorted_beta_d_pixel_list[x]] for x in p_list]
+            delta_beta_temp=np.std([input_beta_zeroth_iteration[sorted_beta_t_pixel_list[x]+pixel_number] for x in p_list])
+            # print 'db^2=',delta_beta_temp*delta_beta_temp
+            # print 'sigma=',sigma_patch_temp
+            p+=1
+
+        patchnum+=1
+        print 'NEW PATCH t ! patch number=',patchnum
+        sigma_patch_list.append(sigma_patch_temp)
+        beta2_patch_list.append(delta_beta_temp*delta_beta_temp)
+        P_t_new.append(pixel_patch_temp)
+        pixel_patch_temp=[]
+        p_list=[]
+        sigma_patch_temp=0 #arbitrary
+        delta_beta_temp=0.0 #arbitrary
+        fisher_tot=0
+
+    #-----------------------------------------------------------------------------------P_s_new--------------------------------------------------------------------
+
+    sigma_patch_temp=0 #arbitrary
+    delta_beta_temp=0.0 #arbitrary
+    pixel_patch_temp=[]
+    p_list=[]
+    patch_list=[]
+    fisher_tot=0
+    p=0
+    patchnum=1
+    while p!=pixel_number:
+        # print 'pp',p
+        # print 'fisher_list[sorted_beta_d_pixel_list[p]]',fisher_list[pixel_list[sorted_beta_d_pixel_list[p]]]
+        fisher_tot+=fisher_list[pixel_list[sorted_beta_s_pixel_list[p]]]
+        pixel_patch_temp.append(pixel_list[sorted_beta_s_pixel_list[p]])
+        p_list.append(p)
+        sigma_patch_temp=(np.linalg.inv(fisher_tot))[0][0]
+
+        p+=1
+        while sigma_patch_temp >= delta_beta_temp*delta_beta_temp:
+            if p==pixel_number:
+                print 'pixel limit reached'
+                print 'p',p
+                break
+
+            # print 'p',p
+            # print 'pixel_list[sorted_beta_d_pixel_list[p]]',pixel_list[sorted_beta_d_pixel_list[p]]
+            fisher_tot+=fisher_list[pixel_list[sorted_beta_s_pixel_list[p]]]
+
+            sigma_patch_temp=(np.linalg.inv(fisher_tot))[0][0]
+            pixel_patch_temp.append(pixel_list[sorted_beta_s_pixel_list[p]])
+            print pixel_patch_temp
+            p_list.append(p)
+            # print '[input_beta_zeroth_iteration[x] for x in pixel_patch_temp]',[input_beta_zeroth_iteration[sorted_beta_d_pixel_list[x]] for x in p_list]
+            delta_beta_temp=np.std([input_beta_zeroth_iteration[sorted_beta_s_pixel_list[x]+2*pixel_number] for x in p_list])
+            # print 'db^2=',delta_beta_temp*delta_beta_temp
+            # print 'sigma=',sigma_patch_temp
+            p+=1
+
+        patchnum+=1
+        print 'NEW s PATCH ! patch number=',patchnum
+        sigma_patch_list.append(sigma_patch_temp)
+        beta2_patch_list.append(delta_beta_temp*delta_beta_temp)
+        P_s_new.append(pixel_patch_temp)
+        pixel_patch_temp=[]
+        p_list=[]
+        sigma_patch_temp=0 #arbitrary
+        delta_beta_temp=0.0 #arbitrary
+        fisher_tot=0
+
+    # print 'OUT OF THE LOOP'
+    return P_d_new,P_t_new,P_s_new,sigma_patch_list,beta2_patch_list
 
 
 # def sigma_addition(fisher_list,P_d,P_t,P_s):
@@ -685,7 +802,7 @@ def iteration(iteration_number,input_beta_zeroth_iteration,P_d_new,P_t_new,P_s_n
     print('iteration_number_int=',iteration_number)
     for i in range(iteration_number):
         print('set_of_beta_slice=',set_of_beta_slice)
-        minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,freq_maps))
+        minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,nside))
 
         sigma=sigma_matrix_making(minimization_result,P_d_new,P_t_new,P_s_new,freq_maps)
         # for j in range(len(sigma)):
@@ -755,6 +872,9 @@ def patch_making_mean(input_beta_zeroth_iteration,sigma,minimization_result,P_d,
 
 def return_fun(pixel):
     return lambda x: -fgal.logL(A_ev(x), np.transpose(freq_maps)[pixel], np.diag(prewhiten_factors**2))
+
+# def return_fun_half(pixel):
+#     return lambda x: -(2.)*fgal.logL(A_ev(x), np.transpose(freq_maps)[pixel], np.diag(prewhiten_factors**2))
 
 #--------------------------------------TEST------------------------------------------
 #
@@ -839,7 +959,7 @@ bounds=((1,8),(15,25),(-8,-0.05))
 
 fun=[]
 last_values=[]
-data=data_patch(freq_maps,P_d)
+data=data_patch(freq_maps,P_d,pixel_list)
 A_ev, A_dB_ev, comp_of_param, x0, params = _A_evaluators(components, instrument, prewhiten_factors=None)#prewhiten_factors)
 print 'param',params
 # print 'A_ev(0)',A_ev(0)
@@ -929,11 +1049,50 @@ minimization_result_pixel=[]
 
 # print 'minimisation results pixel 0',input_beta_zeroth_iteration[0],input_beta_zeroth_iteration[pixel_number],input_beta_zeroth_iteration[pixel_number*2]
 # azert
-map_bd,map_bt,map_bs=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s)
-fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list=fisher_pixel(map_bd,map_bt,map_bs)
-P_d_test=patch_making_pbyp(input_beta_zeroth_iteration,fisher_list)
+map_bd,map_bt,map_bs=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s,nside)
+fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list,fisher_hess_list=fisher_pixel(map_bd,map_bt,map_bs,fun,Hessian=True)
+P_d_test , P_t_test , P_s_test , sigma_patch_list , beta2_patch_list = patch_making_pbyp(input_beta_zeroth_iteration,fisher_list)
 print '[np.sqrt(np.linalg.inv(fisher_list[x])[1][1]',sorted([np.sqrt(np.linalg.inv(fisher_list[x])[1][1])for x in pixel_list]) [-1]
 print 'P_d_test shape',np.shape(P_d_test)
+map_bd_new_sigma,map_bt_new_sigma,map_bs_new_sigma=patch_map(sigma_patch_list,P_d_test,P_t_test,P_s_test,nside)
+map_bd_new_beta2,map_bt_new_beta2,map_bs_new_beta2=patch_map(beta2_patch_list,P_d_test,P_t_test,P_s_test,nside)
+
+
+# print 'np.array(map_bd_new_sigma)',np.array(map_bd_new_sigma)
+
+for i in range(len(map_bd_new_sigma)):
+    if map_bd_new_sigma[i]==None:
+        map_bd_new_sigma[i]=0
+        map_bd_new_beta2[i]=0
+
+for i in range(len(map_bt_new_sigma)):
+    if map_bt_new_sigma[i]==None:
+        map_bt_new_sigma[i]=0
+        map_bt_new_beta2[i]=0
+
+for i in range(len(map_bs_new_sigma)):
+    if map_bs_new_sigma[i]==None:
+        map_bs_new_sigma[i]=0
+        map_bs_new_beta2[i]=0
+
+hp.mollview( np.log(np.array(map_bd_new_sigma)) ,sub=(2,2,1))
+plt.title('map_bd_new_sigma')
+hp.mollview(np.log(np.array(map_bd_new_beta2)),sub=(2,2,2))
+plt.title('map_bd_new_deltabeta2')
+plt.show()
+
+hp.mollview(np.log(np.array(map_bt_new_sigma)),sub=(2,2,1))
+plt.title('map_bt_new_sigma')
+hp.mollview(np.log(np.array(map_bt_new_beta2)),sub=(2,2,2))
+plt.title('map_bt_new_deltabeta2')
+plt.show()
+
+hp.mollview(np.log(np.array(map_bs_new_sigma)),sub=(2,2,1))
+plt.title('map_bs_new_sigma')
+hp.mollview(np.log(np.array(map_bs_new_beta2)),sub=(2,2,2))
+plt.title('map_bs_new_deltabeta2')
+plt.show()
+
 # azertyuiops
 
 
@@ -1003,7 +1162,7 @@ a=delta_beta_matrix_making(P_d,P_t,P_s,input_beta_zeroth_iteration)
 
 # print('matrix comparison=',comp[0])
 # print('input_beta_zeroth_iteration=',input_beta_zeroth_iteration)
-map_d1,map_t1,map_s1=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s)
+map_d1,map_t1,map_s1=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s,nside)
 map_d=[]
 map_t=[]
 map_s=[]
@@ -1016,11 +1175,11 @@ map_s1=[]
 sigma_list=[]
 
 i=0
-hp.mollview(np.array(map_d),sub=(2,2,1),min=bounds[0][0],max=bounds[0][1])
+hp.mollview(np.array(map_d),sub=(2,2,1))#,min=bounds[0][0],max=bounds[0][1])
 plt.title('beta dust map iteration %s' %(i))
-hp.mollview(np.array(map_t),sub=(2,2,2),min=bounds[1][0],max=bounds[1][1])
+hp.mollview(np.array(map_t),sub=(2,2,2))#,min=bounds[1][0],max=bounds[1][1])
 plt.title('dust temp map iteration %s' %(i))
-hp.mollview(np.array(map_s),sub=(2,2,3),min=bounds[2][0],max=bounds[2][1])
+hp.mollview(np.array(map_s),sub=(2,2,3))#,min=bounds[2][0],max=bounds[2][1])
 plt.title('beta sync map iteration %s' %(i))
 plt.subplot(2,2,4)
 plt.plot(comp)
@@ -1114,6 +1273,7 @@ x_axis_list=np.arange(bounds[0][0],15,0.01)
 fun_list_plot=[]
 fun_list=[]
 gauss_list=[]
+gauss_hess_list=[]
 print 'map_t[pixel_list[p_sigmax_t]]',map_t[pixel_list[p_sigmax_t]]
 print 'fisher_list[p_sigmax_t]',fisher_list[pixel_list[p_sigmax_t]]
 print 'sigma max t=',np.sqrt(np.linalg.inv(fisher_list[pixel_list[p_sigmax_t]])[1][1])
@@ -1122,15 +1282,21 @@ for x in x_axis_list:
     gauss_list.append((    ( 1  /  np.sqrt(2*np.pi*np.linalg.inv (fisher_list[pixel_list[p_sigmax_d]])[0][0]) )  *
                                 # np.exp(-(x-map_d[pixel_list[p_sigmax_d]])*(x-map_d[pixel_list[p_sigmax_d]])/(2*np.sqrt(np.linalg.inv (fisher_list[pixel_list[p_sigmax_d]]))[0][0]) ) ))
                                 np.exp(-(x-map_d[pixel_list[p_sigmax_d]])*(x-map_d[pixel_list[p_sigmax_d]])/(2*np.linalg.inv (fisher_list[pixel_list[p_sigmax_d]]))[0][0]) ) )
+    gauss_hess_list.append((    ( 1  /  np.sqrt(2*np.pi*np.linalg.inv (fisher_hess_list[pixel_list[p_sigmax_d]])[0][0]) )  *
+                                # np.exp(-(x-map_d[pixel_list[p_sigmax_d]])*(x-map_d[pixel_list[p_sigmax_d]])/(2*np.sqrt(np.linalg.inv (fisher_list[pixel_list[p_sigmax_d]]))[0][0]) ) ))
+                                np.exp(-(x-map_d[pixel_list[p_sigmax_d]])*(x-map_d[pixel_list[p_sigmax_d]])/(2*np.linalg.inv (fisher_hess_list[pixel_list[p_sigmax_d]]))[0][0]) ) )
     fun_list.append(-(1./2.)*fun[pixel_list[p_sigmax_d]]([x,map_t[pixel_list[p_sigmax_d]],map_s[pixel_list[p_sigmax_d]]]))
 
 max_fun=max(fun_list)
 max_gauss=max(gauss_list)
 min_fun=min(fun_list)
+max_gauss_hess=max(gauss_hess_list)
 for i in range(len(x_axis_list)):
     fun_list_plot.append(np.exp(fun_list[i]-max_fun) * max_gauss )#* np.exp(-min_fun))
+    gauss_hess_list[i]=gauss_hess_list[i] * max_gauss / max_gauss_hess
 plt.plot(x_axis_list , fun_list_plot,label='fun')
-plt.plot(x_axis_list , gauss_list, label='gaussian')
+plt.plot(x_axis_list , gauss_list, label='fisher gaussian')
+plt.plot(x_axis_list , gauss_hess_list, label='hessian gaussian')
 plt.title('gaussian and fun comparison for pixel sigma d max')
 plt.legend()
 plt.show()
@@ -1138,22 +1304,29 @@ plt.show()
 fun_list_plot=[]
 fun_list=[]
 gauss_list=[]
+gauss_hess_list=[]
 x_axis_list=[]
 x_axis_list=np.arange(bounds[1][0],600,0.01)
 for x in x_axis_list:
     gauss_list.append((    ( 1  /  np.sqrt(2*np.pi*np.linalg.inv (fisher_list[pixel_list[p_sigmax_t]])[1][1]) )  *
                                 # np.exp(-(x-map_t[pixel_list[p_sigmax_t]])*(x-map_t[pixel_list[p_sigmax_t]])/(2*np.sqrt(np.linalg.inv (fisher_list[pixel_list[p_sigmax_t]]))[1][1]) ) ))
                                 np.exp(-(x-map_t[pixel_list[p_sigmax_t]])*(x-map_t[pixel_list[p_sigmax_t]])/(2*np.linalg.inv (fisher_list[pixel_list[p_sigmax_t]]))[1][1]) ) )
+    gauss_hess_list.append((    ( 1  /  np.sqrt(2*np.pi*np.linalg.inv (fisher_hess_list[pixel_list[p_sigmax_t]])[1][1]) )  *
+                                # np.exp(-(x-map_t[pixel_list[p_sigmax_t]])*(x-map_t[pixel_list[p_sigmax_t]])/(2*np.sqrt(np.linalg.inv (fisher_list[pixel_list[p_sigmax_t]]))[1][1]) ) ))
+                                np.exp(-(x-map_t[pixel_list[p_sigmax_t]])*(x-map_t[pixel_list[p_sigmax_t]])/(2*np.linalg.inv (fisher_hess_list[pixel_list[p_sigmax_t]]))[1][1]) ) )
     fun_list.append(-(1./2.)*fun[pixel_list[p_sigmax_t]]([map_d[pixel_list[p_sigmax_t]],x,map_s[pixel_list[p_sigmax_t]]]))
 # min_fun=min(fun_list)
 max_fun=max(fun_list)
 max_gauss=max(gauss_list)
+max_gauss_hess=max(gauss_hess_list)
 # print 'min_fun=',min_fun,'  ','max_fun=',max_fun
 for i in range(len(x_axis_list)):
     fun_list_plot.append(np.exp(fun_list[i]-max_fun)*max_gauss)
+    gauss_hess_list[i]=gauss_hess_list[i] * max_gauss / max_gauss_hess
     # print 'fun_list_plot[%s]'%i,fun_list_plot[i]
 plt.plot(x_axis_list , fun_list_plot,label='fun')
-plt.plot(x_axis_list , gauss_list, label='gaussian')
+plt.plot(x_axis_list , gauss_list, label='fisher gaussian')
+plt.plot(x_axis_list , gauss_hess_list, label='hessian gaussian')
 plt.title('gaussian and fun comparison for pixel sigma t max')
 plt.legend()
 plt.show()
@@ -1161,6 +1334,7 @@ plt.show()
 fun_list_plot=[]
 fun_list=[]
 gauss_list=[]
+gauss_hess_list=[]
 x_axis_list=[]
 x_axis_list=np.arange(-20,0,0.01)
 
@@ -1168,19 +1342,26 @@ for x in x_axis_list:
     gauss_list.append((    ( 1  /  np.sqrt(2*np.pi*np.linalg.inv (fisher_list[pixel_list[p_sigmax_s]])[2][2]) )  *
                                 # np.exp(-(x-map_s[pixel_list[p_sigmax_s]])*(x-map_s[pixel_list[p_sigmax_s]])/(2*np.sqrt(np.linalg.inv (fisher_list[pixel_list[p_sigmax_s]]))[2][2]) ) ))
                                 np.exp(-(x-map_s[pixel_list[p_sigmax_s]])*(x-map_s[pixel_list[p_sigmax_s]])/(2*np.linalg.inv (fisher_list[pixel_list[p_sigmax_s]]))[2][2]) ) )
+    gauss_hess_list.append((    ( 1  /  np.sqrt(2*np.pi*np.linalg.inv (fisher_hess_list[pixel_list[p_sigmax_s]])[2][2]) )  *
+                                # np.exp(-(x-map_s[pixel_list[p_sigmax_s]])*(x-map_s[pixel_list[p_sigmax_s]])/(2*np.sqrt(np.linalg.inv (fisher_list[pixel_list[p_sigmax_s]]))[2][2]) ) ))
+                                np.exp(-(x-map_s[pixel_list[p_sigmax_s]])*(x-map_s[pixel_list[p_sigmax_s]])/(2*np.linalg.inv (fisher_hess_list[pixel_list[p_sigmax_s]]))[2][2]) ) )
+
+
     fun_list.append(-(1./2.)*fun[pixel_list[p_sigmax_s]]([map_d[pixel_list[p_sigmax_s]],map_t[pixel_list[p_sigmax_s]],x]))
     last_values[pixel_list[p_sigmax_s]]
 max_fun=max(fun_list)
 max_gauss=max(gauss_list)
-
+max_gauss_hess=max(gauss_hess_list)
 print 'np.argmax(fun_list)',np.argmax(fun_list)
 print 'x[np.argmax(fun_list)]',x_axis_list[np.argmax(fun_list)]
 print 'map_s[pixel_list[p_sigmax_s]]',map_s[pixel_list[p_sigmax_s]]
 print 'min(map_s)',min([x for x in map_s if x is not None])
 for i in range(len(x_axis_list)):
     fun_list_plot.append(np.exp(fun_list[i]-max_fun)* max_gauss)
+    gauss_hess_list[i]=gauss_hess_list[i] * max_gauss / max_gauss_hess
 plt.plot(x_axis_list , fun_list_plot,label='fun')
-plt.plot(x_axis_list , gauss_list, label='gaussian')
+plt.plot(x_axis_list , gauss_list, label='fisher gaussian')
+plt.plot(x_axis_list , gauss_hess_list, label='hessian gaussian')
 plt.title('gaussian and fun comparison for pixel sigma s max')
 plt.legend()
 plt.show()
@@ -1220,18 +1401,43 @@ print 'inv fisher pmax',np.linalg.inv(fisher_list[pixel_list[p_sigmax_s]])
 print 'fisher s',fisher_s_list[pixel_list[p_sigmax_s]]
 print 'fisher n',fisher_n_list[pixel_list[p_sigmax_s]]
 print '_______________________________________________________________________________'
+# print 'pixel_number=',pixel_number
+# print 'len(fisher_hess_list)',len(fisher_hess_list)
+# print 'np.linalg.inv(fisher_hess_list[x])[0][0]) for x in pixel_list]',[np.sqrt(np.linalg.inv(fisher_hess_list[x])[0][0]) for x in pixel_list]
+forbidden_p=[]
+for p in pixel_list:
+    if np.isnan(np.sqrt(np.linalg.inv(fisher_hess_list[p])[0][0])):
+        forbidden_p.append(p)
 
 #------------------------------------------------------------SIGMA HISTO------------------------------------------------------
-plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]),pixel_number)#,binsd)
-plt.title('sigma_d histogram')
+plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]) ,pixel_number , histtype='step', label='sigma_d histogram')#,binsd)
+# plt.title('sigma_d histogram')
+plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_hess_list[x])[0][0]) for x in pixel_list if x not in forbidden_p]),pixel_number, histtype='step', label='sigma_d_hess histogram')#,binsd)
+# plt.title('sigma_d_hess histogram')
+plt.legend()
 plt.show()
 
-plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),pixel_number)#,binsd)
-plt.title('sigma_t histogram')
+
+forbidden_p=[]
+for p in pixel_list:
+    if np.isnan(np.sqrt(np.linalg.inv(fisher_hess_list[p])[1][1])):
+        forbidden_p.append(p)
+plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='sigma_t histogram')#,binsd)
+# plt.title('sigma_t histogram')
+plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_hess_list[x])[1][1]) for x in pixel_list if x not in forbidden_p]),pixel_number, histtype='step', label='sigma_t_hess histogram')#,binsd)
+# plt.title('sigma_t_hess histogram')
+plt.legend()
 plt.show()
 
-plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number)#,binsd)
-plt.title('sigma_s histogram')
+forbidden_p=[]
+for p in pixel_list:
+    if np.isnan(np.sqrt(np.linalg.inv(fisher_hess_list[p])[2][2])):
+        forbidden_p.append(p)
+plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='sigma_s histogram')#,binsd)
+# plt.title('sigma_s histogram')
+plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_hess_list[x])[2][2]) for x in pixel_list if x not in forbidden_p]),pixel_number, histtype='step', label='sigma_s_hess histogram')#,binsd)
+# plt.title('sigma_s_hess histogram')
+plt.legend()
 plt.show()
 
 #------------------------------------------------------------BETA HISTO------------------------------------------------------
@@ -1297,7 +1503,7 @@ plt.show()
 # print 's_q_d',s_q_d
 
 
-
+AZERTY
 
 # print('P_d bla=',P_d)
 P_d_new,P_t_new,P_s_new,set_of_beta_slice=patch_making(input_beta_zeroth_iteration,sigma,P_d,P_t,P_s)
@@ -1338,7 +1544,7 @@ i=0
 h=1
 # while comp[i]>0.00021:
 for i in range(10):
-    map_d1,map_t1,map_s1=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new)
+    map_d1,map_t1,map_s1=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new,nside)
     map_d=[]
     map_t=[]
     map_s=[]
@@ -1411,7 +1617,7 @@ for i in range(10):
     sigma_list.append(np.linalg.norm(sigma))
 
 
-    sigma_d_map,sigma_t_map,sigma_s_map=patch_map(sigma.diagonal(0),P_d_new,P_t_new,P_s_new)
+    sigma_d_map,sigma_t_map,sigma_s_map=patch_map(sigma.diagonal(0),P_d_new,P_t_new,P_s_new,nside)
 
     hp.mollview(np.array(sigma_d_map),sub=(2,2,1))
     plt.title('sigma^2 beta dust map iteration %s' %(i))
@@ -1422,7 +1628,7 @@ for i in range(10):
     plt.show()
 
 
-    # minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,freq_maps))
+    # minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,nside))
     minimization_result_pixel=[]
     minimization_result=[]
     for p in range(pixel_number):
@@ -1470,7 +1676,7 @@ for i in range(10):
 sigma_list.append(np.linalg.norm(sigma))
 # print(smart)
 # print(smart[1])
-map_d,map_t,map_s=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new)
+map_d,map_t,map_s=patch_map(set_of_beta_slice,P_d_new,P_t_new,P_s_new,nside)
 hp.mollview(np.array(map_d),sub=(2,2,1),min=bounds[0][0],max=bounds[0][1])
 plt.title('beta dust map iteration %s' %(i))
 hp.mollview(np.array(map_t),sub=(2,2,2),min=bounds[1][0],max=bounds[1][1])
