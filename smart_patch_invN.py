@@ -1,7 +1,7 @@
-import os
-
-path_to_fgbuster = '/mnt/c/Users/Baptiste/fgbuster'
-os.sys.path.insert(0, os.path.realpath(path_to_fgbuster))
+# import os
+#
+# path_to_fgbuster = '/mnt/c/Users/Baptiste/fgbuster'
+# os.sys.path.insert(0, os.path.realpath(path_to_fgbuster))
 
 
 import numpy as np
@@ -11,6 +11,7 @@ import scipy
 import sys
 import matplotlib.pyplot as plt
 import pysm
+from numba import jit
 #import fgbuster as fg
 from fgbuster.pysm_helpers import get_instrument, get_sky
 from fgbuster.component_model import CMB, Dust, Synchrotron
@@ -27,9 +28,10 @@ from mpl_toolkits.mplot3d import Axes3D
 #------------------------------------------------------SKY GENERATION----------------------------------------------------
 nside_comparison_for_fine_tuning=True
 if nside_comparison_for_fine_tuning!=True:
-    nside = 8
+    nside = 4
     pixel_number=hp.nside2npix(nside)
-    sky = get_sky(nside, 'd0s0')
+    pysm_model='c1d1s1'
+    sky = get_sky(nside, pysm_model)
     nu = np.array([40.0, 50.0, 60.0, 68.4, 78.0, 88.5, 100.0, 118.9, 140.0, 166.0, 195.0, 234.9, 280.0, 337.4, 402.1])
 
     pixel_number=hp.nside2npix(nside)
@@ -205,7 +207,7 @@ def patch_map(input_set_of_betas,P_d,P_t,P_s,nside):
         ind+=1
     return map_bd,map_bt,map_bs
 
-def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,pixel_list,nside): #computes the joint likelihood for the whole sky taking into account the patches
+def joint_spectral_likelihood(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac): #computes the joint likelihood for the whole sky taking into account the patches
     #prewhiten_factors must be defined above !
     logL_spec=0
     #first we have to create the maps of beta in the sky to link each patch with its corresponding beta value
@@ -243,6 +245,7 @@ def joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,pixel_list,nside): 
 
     map_bd,map_bt,map_bs=patch_map(input_set_of_betas,P_d,P_t,P_s,nside)
     # print 'input_set_of_betas',input_set_of_betas
+    # print 'jac',jac(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac)
 
     for p in pixel_list:
         logL_spec+=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
@@ -256,6 +259,7 @@ def joint_spectral_likelihood_one_patch(input_set_of_betas,P_i,patch_index,pixel
     for p in P_i[patch_index]:
         logL_spec+=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
     del map_bd,map_bt,map_bs
+    logL_spec*=1e-9
     return logL_spec
 
 def sigma_matrix_making(minimization_result,P_d,P_t,P_s,last_values): #computes the sigma matrix for each patch and creates the total sigma matrix for the whole sky
@@ -423,8 +427,8 @@ def fisher_pixel(map_bd,map_bt,map_bs,fun,pixel_list,freq_maps,prewhiten_factors
             print ' /!\ NAN in S /!\ '
             print 'at pixel %s'%p
             print 's',s
-            print 'u_e_v_last[0][1]',u_e_v_last[0][1]
-            print 'pw_d[0]',pw_d[0]
+            # print 'u_e_v_last[0][1]',u_e_v_last[0][1]
+            # print 'pw_d[0]',pw_d[0]
     if Hessian==True:
         return fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list,fisher_hess_list
     return fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list
@@ -845,7 +849,7 @@ def iteration(iteration_number,input_beta_zeroth_iteration,P_d_new,P_t_new,P_s_n
     print('iteration_number_int=',iteration_number)
     for i in range(iteration_number):
         print('set_of_beta_slice=',set_of_beta_slice)
-        minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,nside))
+        minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(fun,P_d_new,P_t_new,P_s_new,nside))
 
         sigma=sigma_matrix_making(minimization_result,P_d_new,P_t_new,P_s_new,freq_maps)
         # for j in range(len(sigma)):
@@ -911,10 +915,18 @@ def patch_making_mean(input_beta_zeroth_iteration,sigma,minimization_result,P_d,
 
     return 0
 
-def return_fun(pixel,freq_maps,prewhiten_factors):
+def return_fun(pixel,freq_maps,prewhiten_factors,A_ev):
     # print 'A_ev 3param',A_ev([1.5,20,-3])
     # print 'A_ev 2param',A_ev([1.5,-3])
     return lambda x: -fgal.logL(A_ev(x), np.transpose(freq_maps)[pixel], np.diag(prewhiten_factors**2 ) )
+
+
+def return_jac(pixel,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB):
+    return lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[pixel], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)
+
+
+
+
 
 # def return_fun_half(pixel):
 #     return lambda x: -(2.)*fgal.logL(A_ev(x), np.transpose(freq_maps)[pixel], np.diag(prewhiten_factors**2))
@@ -977,11 +989,46 @@ if nside_comparison_for_fine_tuning!=True:
 
 
 
+zeroth_iteration=True
+joint_likelihood_test=True
+
+plot_histo_residu_normal_and_jsl=True
+plot_joint_likelihood_test=True #f
+plot_signal_to_noise=True #f
+plot_histo_residu=True #f
+likelihood_comparison=True
+jac_comparison=True
+plot_res_to_noise=True
+
+
+
+if plot_joint_likelihood_test==True:
+    fig_res_jsl, ax_res_jsl  = plt.subplots(2, 2,  tight_layout=True)
+
+if plot_histo_residu_normal_and_jsl==True:
+    fig_res_norm_and_jsl , ax_res_norm_and_jsl = plt.subplots(2, 2,  tight_layout=True)
+
+if plot_histo_residu==True and zeroth_iteration==True:
+    fig_res_norm , ax_res_norm = plt.subplots(2, 2,  tight_layout=True)
+
+if plot_signal_to_noise==True and zeroth_iteration==True:
+    fig_signal_to_noise , ax_signal_to_noise = plt.subplots(2, 2,  tight_layout=True)
+
+
+if plot_signal_to_noise==True and joint_likelihood_test==True:
+    fig_signal_to_noise_jsl , ax_signal_to_noise_jsl = plt.subplots(2, 2,  tight_layout=True)
+
+if plot_res_to_noise==True and joint_likelihood_test==True:
+    fig_res_to_noise_jsl , ax_res_to_noise_jsl = plt.subplots(2, 2,  tight_layout=True)
+
+
 if nside_comparison_for_fine_tuning==True:
-    for nside in [8]:
-        fig, axs = plt.subplots(2, 2,  tight_layout=True)
-        fig_comp_sep, axs_comp_sep = plt.subplots(2, 2,  tight_layout=True)
-        sky = get_sky(nside, 'd0s0')
+    # fig, axs = plt.subplots(2, 2,  tight_layout=True)
+    for nside in [2]:
+
+        # fig_comp_sep, axs_comp_sep = plt.subplots(2, 2,  tight_layout=True)
+        pysm_model='c1d1s1'
+        sky = get_sky(nside, pysm_model)
         np.random.seed (seed=None)
         map_bd_list=[]
         map_bt_list=[]
@@ -989,6 +1036,11 @@ if nside_comparison_for_fine_tuning==True:
         map_bd_list_comp_sep=[]
         map_bt_list_comp_sep=[]
         map_bs_list_comp_sep=[]
+        map_bd_list_jsl_test=[]
+        map_bt_list_jsl_test=[]
+        map_bs_list_jsl_test=[]
+
+
         for iter in range(1):
             pixel_number=hp.nside2npix(nside)
 
@@ -1009,7 +1061,7 @@ if nside_comparison_for_fine_tuning==True:
             noise[:, 2, :] *= sigma_pix_P[:, None]
 
 
-            freq_maps = instrument.observe(sky, write_outputs=False)[0] + noise
+            freq_maps = instrument.observe(sky, write_outputs=False)[0] #+ noise
             freq_maps=freq_maps[:,1:,:]  #on retire la temperature (1:) car on ne prend en compte que Q&U pas I
             components = [CMB(), Dust(150.), Synchrotron(20.)]
             prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)         # correspond a N^-1/2
@@ -1062,6 +1114,8 @@ if nside_comparison_for_fine_tuning==True:
 
 
 
+
+
             P_d=[]
             P_s=[]
             P_t=[]
@@ -1073,9 +1127,20 @@ if nside_comparison_for_fine_tuning==True:
             for i in range(len(freq_maps[0][0])):
                 input_set_of_betas.append(1.54)
             for i in range(len(freq_maps[0][0])):
-                input_set_of_betas.append(20.0)
+                input_set_of_betas.append(19.6)
             for i in range(len(freq_maps[0][0])):
-                input_set_of_betas.append(-3.0)
+                input_set_of_betas.append(-3.1)
+
+
+
+
+            input_set_of_betas_rand=[]
+            for i in range(len(freq_maps[0][0])):
+                input_set_of_betas_rand.append(1.54+np.random.uniform(-1.54/10.0,1.54/10.0))
+            for i in range(len(freq_maps[0][0])):
+                input_set_of_betas_rand.append(19.6+np.random.uniform(-19.6/10.0,19.6/10.0))
+            for i in range(len(freq_maps[0][0])):
+                input_set_of_betas_rand.append(-3.1+np.random.uniform(3.1/10.0,-3.1/10.0))
 
 
 
@@ -1088,12 +1153,17 @@ if nside_comparison_for_fine_tuning==True:
             if len(params)==3:
                 print '3 PARAMS !!'
                 jac_list=[]
-                bounds=((1.0, 5.0),(15,25),(-3.5,-2.0))
+                # bounds=((1.0, 5.0),(15,25),(-3.5,-2.0))
+                if pysm_model=='c1d1s1':
+                    bounds=((1.45,1.7),(1.0,100),(-7.5,0.5)) #GOOOOOD ONES FOR C1D1S1 DON'T TOUCH!!!!!!!!!!
+                if pysm_model=='d0s0':
+                    bounds=((0.5,2.5),(1.0,75),(-7.5,0.5)) # Not the best one yet, needs some more fine tuning
                 # bounds=((0.1, 10.0),(0.1,100),(-10,-0.1))
                 A_dB_ev, comp_of_dB = fgal._A_dB_ev_and_comp_of_dB_as_compatible_list(A_dB_ev, comp_of_param, x0)
 
-                for p in range(pixel_number):
-                    jac_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False))
+                # for p in range(pixel_number):
+                    # jac_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False))
+                    # jac_list.append(return_jac(p,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB))
                     # if p==0:
                         # print 'A_ev([1.55,19.6,-3.1])',A_ev([1.55,19.6,-3.1])
                         # print 'np.transpose(freq_maps)[0]',np.transpose(freq_maps)[0]
@@ -1103,12 +1173,24 @@ if nside_comparison_for_fine_tuning==True:
                 # jac_list=[None]*hp.nside2npix(nside)
                 # for p in pixel_list:
                 #     jac_list[p]=lambda x :fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[pixel_list.index (p)], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)
+                # sys.exit()
+
+
+                # print 'dpixel_nulber=',np.transpose(freq_maps)[pixel_number-1]
+                # print 'd0=',np.transpose(freq_maps)[0]
+                # print 'jac0 =',jac_list[0]([1.54,19.6,-3.1])
+                # print 'd50=',np.transpose(freq_maps)[50]
+                # print 'jac50 =',jac_list[50]([1.54,19.6,-3.1])
+                # print 'jac50 =',jac_list[50]([1.54,19.6,-3.1])[0]
+                # sys.exit()
 
                 fun=[None]*hp.nside2npix(nside)
                 last_values=[None]*hp.nside2npix(nside)
                 for l in range(pixel_number):
-                    fun[pixel_list[l]] = return_fun(l,freq_maps,prewhiten_factors)
-
+                    fun[pixel_list[l]] = return_fun(l,freq_maps,prewhiten_factors,A_ev)
+                    jac_list.append(return_jac(l,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB))
+                # print 'fun0 =',fun[pixel_list[0]]([1.54,19.6,-3.1])
+                # print 'fun50 =',fun[pixel_list[50]]([1.54,19.6,-3.1])
 
                 # fig = plt.figure()
                 # ax3D = fig.add_subplot(111, projection='3d')
@@ -1201,80 +1283,398 @@ if nside_comparison_for_fine_tuning==True:
                 # plt.show()
 
                 # sys.exit()
+                if zeroth_iteration==True:
+                    comp=[]
+                    minimization_result_pixel=[]
+                    input_beta_zeroth_iteration=[]
+                    input_beta_zeroth_iteration_comp_sep=[]
+                    comp_sep_result_pixel=[]
+                    # x0=np.array([1.55,19.6,-3])
+                    # print x0
+                    # res= fgal.comp_sep(A_ev, np.transpose(freq_maps)[0], np.diag(prewhiten_factors**2 ), A_dB_ev, comp_of_dB,x0)
+                    #
+                    # print 'res comp sep=',res.x
+                    # print 'fun pix 0=',fun[0](x0)
+                    # print 'jac pix0=',jac_list[0](x0)
+                    # print 'jac pix0 inv=', [1/jac_list[0](x0)[0],1/jac_list[0](x0)[1],1/jac_list[0](x0)[2]]
+                    # fun_build, jac_build, last_values_build = fgal._build_bound_inv_logL_and_logL_dB(A_ev, np.transpose(freq_maps)[0], np.diag(prewhiten_factors**2 ), A_dB_ev, comp_of_dB)
+                    # print 'jac build=',jac_build(x0)
+                    for p in range(pixel_number):
+                        # print 'MINIMIZATION !!!!!'
 
-                comp=[]
-                minimization_result_pixel=[]
-                input_beta_zeroth_iteration=[]
-                input_beta_zeroth_iteration_comp_sep=[]
-                comp_sep_result_pixel=[]
-                # x0=np.array([1.55,19.6,-3])
-                # print x0
-                # res= fgal.comp_sep(A_ev, np.transpose(freq_maps)[0], np.diag(prewhiten_factors**2 ), A_dB_ev, comp_of_dB,x0)
-                #
-                # print 'res comp sep=',res.x
-                # print 'fun pix 0=',fun[0](x0)
-                # print 'jac pix0=',jac_list[0](x0)
-                # print 'jac pix0 inv=', [1/jac_list[0](x0)[0],1/jac_list[0](x0)[1],1/jac_list[0](x0)[2]]
-                # fun_build, jac_build, last_values_build = fgal._build_bound_inv_logL_and_logL_dB(A_ev, np.transpose(freq_maps)[0], np.diag(prewhiten_factors**2 ), A_dB_ev, comp_of_dB)
-                # print 'jac build=',jac_build(x0)
-                for p in range(pixel_number):
-                    # print 'MINIMIZATION !!!!!'
+                        # def fun_print(x):
+                        #     print (x)
+                        #     return fun[pixel_list[p]](x)
 
-                    # def fun_print(x):
-                    #     print (x)
-                    #     return fun[pixel_list[p]](x)
+                        # minimization_result_pixel.append(scipy.optimize.minimize(fun_print,np.array([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]]),\
+                        # bounds=bounds, tol=1e-18, jac=jac_list[p],method='L-BFGS-B', options = {'disp':True,\
+                        # 'stepmx':0.01,\
+                        # 'eps': 1e-7,\
+                        #  'ftol':1e-12,\
+                        # 'xtol':1e-12,\
+                        # 'gtol':1e-12,\
+                        # 'maxiter': 10000
+                        # }).x)
+                        # print 'jac at [1.54,20,-3]',jac_list[0]([1.54,20,-3])
+                        # minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],np.array([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]]),\
+                        # jac=jac_list[p], bounds=bounds, tol=1e-18).x)
+                        minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],np.array([input_set_of_betas[p],input_set_of_betas[p+len(P_d)],input_set_of_betas[p+len(P_d)+len(P_t)]]),\
+                        jac=jac_list[p], tol=1e-18,bounds=bounds).x)
+                        # bounds=((1.0, 5.0),(15,25),(-3.5,-2.0))
+                        # iter_while=0
+                        # while minimization_result_pixel[-1][0]<=5.0 or minimization_result_pixel[-1][0]>=1.0 or minimization_result_pixel[-1][1]<=15.0 or minimization_result_pixel[-1][1]>=25 or minimization_result_pixel[-1][2]<=-3.5 or minimization_result_pixel[-1][2]>=-2.0:
+                        #     print 'wrong pixel=',pixel_list[p]
+                        #     print 'wrong minimization=',minimization_result_pixel[-1]
+                        #     new_init=np.array([input_set_of_betas[p]+np.random.uniform(-input_set_of_betas[p]/10.0,input_set_of_betas[p]/10.0) , input_set_of_betas[p+pixel_number]+np.random.uniform(-input_set_of_betas[p+pixel_number]/10.0 , input_set_of_betas[p+pixel_number]/10.0),\
+                        #     input_set_of_betas[p+2*pixel_number]+np.random.uniform(input_set_of_betas[p+2*pixel_number]/10.0,-input_set_of_betas[p+2*pixel_number]/10.0)])
+                        #     print 'new_init=',new_init
+                        #     minimization_result_pixel[-1]=scipy.optimize.minimize(fun[pixel_list[p]],new_init,\
+                        #     jac=jac_list[p], tol=1e-18).x
+                        #
+                        #     iter_while+=1
+                        #     if iter_while==10:
+                        #         print 'too much loop'
+                        #
+                        #         break
 
-                    # minimization_result_pixel.append(scipy.optimize.minimize(fun_print,np.array([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]]),\
-                    # bounds=bounds, tol=1e-18, jac=jac_list[p],method='L-BFGS-B', options = {'disp':True,\
-                    # 'stepmx':0.01,\
-                    # 'eps': 1e-7,\
-                    #  'ftol':1e-12,\
-                    # 'xtol':1e-12,\
-                    # 'gtol':1e-12,\
-                    # 'maxiter': 10000
-                    # }).x)
-                    # print 'jac at [1.54,20,-3]',jac_list[0]([1.54,20,-3])
-                    minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],np.array([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]]),\
-                    jac=jac_list[p], bounds=bounds, tol=1e-18).x)
-                    comp_sep_result_pixel.append(fgal.comp_sep(A_ev, np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2 ), A_dB_ev, comp_of_dB,x0).x)
-                    # minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],np.array([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]])).x)
-                    # print 'minimization_result_pixel',minimization_result_pixel
-                    # print 'fun pix 0 (miniresults)=',fun[0](minimization_result_pixel[0])
-                    # print 'fun pix 0=',fun[0]([1.54,20,-3])
-                    # print 'jac_list[p](init)',jac_list[p]([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]])
-                    # print 'jac_build(init)',jac_build([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]])
+                        if minimization_result_pixel[-1][1]>=1e6:
+                            # beta_d_range=np.arange(1.5, 1.6, 0.1/1000.)
+                            # beta_t_range=np.arange(1e5,1e9,10000)
+                            # beta_t_range=np.arange(10,150,140/1000.)
+                            beta_t_range=np.logspace(0.0,8,100)
+                            print 'beta_t_range',beta_t_range
+                            # beta_t_range=np.arange(minimization_result_pixel[-1][1]-100,minimization_result_pixel[-1][1]+100,200/1000.)
+                            # temp_d_range=np.arange(19,21,2./10.)
+                            print 'minimization_result_pixel[-1]',minimization_result_pixel[-1]
+                            print 'fun',fun[pixel_list[p]](minimization_result_pixel[-1])
+                            # beta_s_range=np.arange(-4,-2, 2./10.)
+                            fun_list=np.zeros(len(beta_t_range))
+                            for x in range(len(beta_t_range)):
+                                fun_list[x]=(-1./2.)*fun[pixel_list[p]]([1.54,beta_t_range[x],-3.1])
+
+                            max_fun=max(fun_list)
+                            fun_list_plot=np.zeros(len(beta_t_range))
+                            for x in range(len(beta_t_range)):
+                                fun_list_plot[x]=np.exp(fun_list[x]-max_fun)
+
+                            plt.plot(beta_t_range,fun_list_plot)
+                            plt.xscale('log')
+                            plt.show()
+                            sys.exit()
+
+                        # comp_sep_result_pixel.append(fgal.comp_sep(A_ev, np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2 ), A_dB_ev, comp_of_dB,x0).x)
+                        # minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],np.array([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]])).x)
+                        # print 'minimization_result_pixel',minimization_result_pixel
+                        # print 'fun pix 0 (miniresults)=',fun[0](minimization_result_pixel[0])
+                        # print 'fun pix 0=',fun[0]([1.54,20,-3])
+                        # print 'jac_list[p](init)',jac_list[p]([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]])
+                        # print 'jac_build(init)',jac_build([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]])
+
+                        # sys.exit()
+                    for i in range(len(P_d)):
+                        input_beta_zeroth_iteration.append(minimization_result_pixel[i][0])
+                        # print comp_sep_result_pixel[i][0]
+                        # input_beta_zeroth_iteration_comp_sep.append( comp_sep_result_pixel[i][0] )
+                    for i in range(len(P_t)):
+                        input_beta_zeroth_iteration.append(minimization_result_pixel[i][1])
+                        # input_beta_zeroth_iteration_comp_sep.append(comp_sep_result_pixel[i][1])
+                    for i in range(len(P_s)):
+                        input_beta_zeroth_iteration.append(minimization_result_pixel[i][2])
+                        # input_beta_zeroth_iteration_comp_sep.append(comp_sep_result_pixel[i][2])
+                    minimization_result_pixel=[]
+                    comp_sep_result_pixel=[]
+
+                    map_bd,map_bt,map_bs=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s,nside)
+                    # map_bd_comp_sep,map_bt_comp_sep,map_bs_comp_sep=patch_map(input_beta_zeroth_iteration_comp_sep,P_d,P_t,P_s,nside)
+
+                    # print 'fun pixel_test', fun[pixel_test]([map_bd[pixel_test],map_bt[pixel_test],map_bs[pixel_test]])
+                    # print 'betas pixel_test',[map_bd[pixel_test],map_bt[pixel_test],map_bs[pixel_test]]
+                    # print 'map_bt',map_bt
+                    # sys.exit()
+                    # print 'map_bt',map_bt
+                    fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list,fisher_hess_list=fisher_pixel(map_bd,map_bt,map_bs,fun,pixel_list,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB,Hessian=True)
+
+                    map_bd_list.append(map_bd)
+                    map_bt_list.append(map_bt)
+                    map_bs_list.append(map_bs)
+
+                    # map_bd_list_comp_sep.append(map_bd_comp_sep)
+                    # map_bt_list_comp_sep.append(map_bt_comp_sep)
+                    # map_bs_list_comp_sep.append(map_bs_comp_sep)
+
+                if joint_likelihood_test==True:
+
+                    # def return_jac_super_list(A_ev,freq_maps,prewhiten_factors,A_dB_ev,comp_of_dB,input_set_of_betas,P_d,P_t,P_s,nside,pixel_list,pixel_number):
+                    #     jac_super_list=[]
+                    #     for p in range(len(P_d)):
+                    #         jac_super_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)[0])
+                    #     for p in range(len(P_t)):
+                    #         jac_super_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)[1])
+                    #     for p in range(len(P_s)):
+                    #         jac_super_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)[2])
+                    #     # map_bd_init,map_bt_init,map_bs_init=patch_map(input_set_of_betas,P_d,P_t,P_s,nside)
+                    #
+                    #     print [jac([input_set_of_betas[jac_super_list.index(jac)%pixel_number],input_set_of_betas[pixel_number+jac_super_list.index(jac)%pixel_number],input_set_of_betas[2*pixel_number+jac_super_list.index(jac)%pixel_number]]) for jac in jac_super_list]
+                    #
+                    #     return lambda y : [ jac( [ y[jac_super_list.index(jac)%len(P_d)] , y[pixel_number+jac_super_list.index(jac)%len(P_t)] , y[2*pixel_number+jac_super_list.index(jac)%len(P_t)] ] )  for jac in jac_super_list ]
+                    import time
+                    def return_jac_super_list(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac): # /!\!!!!!!  NE MARCHE QUE DANS CE CAS PRECIS OU IL Y A AUTANT D'ELEMENT DANS P_i QUE DE PIXEL !!!!
+                        map_bd,map_bt,map_bs=patch_map(input_set_of_betas,P_d,P_t,P_s,nside)
+                        # jac_super_list=[]
+                        # for p in range(pixel_number):
+                        #     # jac_super_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)[0])
+                        #
+                        #     # start = time.time()
+                        #     jac_super_list.append( return_jac(p,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB) \
+                        #                                 ( [input_set_of_betas[p] , input_set_of_betas[ len(P_d) + p ] , input_set_of_betas[len(P_d)+len(P_t) + p ]] ) [0] )
+                        # #     # end=time.time()
+                        # #     # print 'time in loop#%s ='%p,end - start
+                        # #
+                        # for p in range(len(P_t)):
+                        # #     # jac_super_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)[1])
+                        #     jac_super_list.append( return_jac(p,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB) \
+                        #                                 ( [input_set_of_betas[p] , input_set_of_betas[ len(P_d) + p ] , input_set_of_betas[len(P_d)+len(P_t)  + p ]] ) [1] )
+                        # for p in range(len(P_s)):
+                        # #     # jac_super_list.append(lambda x :-fgal.logL_dB(A_ev(x), np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2), A_dB_ev(x), comp_of_dB, return_svd=False)[2])
+                        #     jac_super_list.append( return_jac(p,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB) \
+                        #                                 ( [input_set_of_betas[p] , input_set_of_betas[ len(P_d) + p ] , input_set_of_betas[len(P_d)+len(P_t)  + p ]] ) [2] )
+                        # map_bd_init,map_bt_init,map_bs_init=patch_map(input_set_of_betas,P_d,P_t,P_s,nside)
+
+                        # print [jac([input_set_of_betas[jac_super_list.index(jac)%pixel_number],input_set_of_betas[pixel_number+jac_super_list.index(jac)%pixel_number],input_set_of_betas[2*pixel_number+jac_super_list.index(jac)%pixel_number]]) for jac in jac_super_list]
+
+                        # return np.array([ jac( [ input_set_of_betas[jac_super_list.index(jac)%len(P_d)] , input_set_of_betas[pixel_number+jac_super_list.index(jac)%len(P_t)] , \
+                        #                             input_set_of_betas[2*pixel_number+jac_super_list.index(jac)%len(P_t)] ] )  for jac in jac_super_list ])
+
+
+                        jac_super_temp=0
+                        jac_super_list=[]
+                        for patch in range(len(P_d)):
+                            for p in P_d[patch]:
+                                jac_super_temp+=return_jac(pixel_list.index(p),freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB) \
+                                                            ( [map_bd[p] , map_bt[p] , map_bs[p]] ) [0]
+                            jac_super_list.append(jac_super_temp)
+                            jac_super_temp=0
+                        for patch in range(len(P_t)):
+                            for p in P_t[patch]:
+                                jac_super_temp+=return_jac(pixel_list.index(p),freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB) \
+                                                            ( [map_bd[p] , map_bt[p] , map_bs[p]] ) [1]
+                            jac_super_list.append(jac_super_temp)
+                            jac_super_temp=0
+                        for patch in range(len(P_s)):
+                            for p in P_s[patch]:
+                                jac_super_temp+=return_jac(pixel_list.index(p),freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB) \
+                                                            ( [map_bd[p] , map_bt[p] , map_bs[p]] ) [2]
+                            jac_super_list.append(jac_super_temp)
+                            jac_super_temp=0
+
+
+                        return np.array(jac_super_list)
+
+
+                    # super_jac = return_jac_super_list(A_ev,freq_maps,prewhiten_factors,A_dB_ev,comp_of_dB,input_set_of_betas,P_d,P_t,P_s,nside,pixel_list,pixel_number)
+
+                    input_true_pysm_beta=[]
+                    for l in pixel_list:
+                        input_true_pysm_beta.append(map_beta_dust_pysm[l])
+                    for l in pixel_list:
+                        input_true_pysm_beta.append(map_temp_dust_pysm[l])
+                    for l in pixel_list:
+                        input_true_pysm_beta.append(map_beta_sync_pysm[l])
+                    jac=[]
+
+                    map_bd_arg,map_bt_arg,map_bs_arg=patch_map(input_set_of_betas,P_d,P_t,P_s,nside)
+                    print 'map_bd - input_bt=',np.array([map_bd_arg[p] for p in pixel_list]) - np.array(input_set_of_betas[ : len(P_d)] )
+                    print 'map_bs - input_bt=',np.array([map_bs_arg[p] for p in pixel_list]) - np.array(input_set_of_betas[ len(P_d) + len(P_t) : ] )
+                    start = time.time()
+                    jac0=return_jac_super_list(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac)
+                    print 'super_jac init',jac0
+                    end=time.time()
+                    print 'time super_jac exec',end - start
+                    # sys.exit()
+
+                    print 'super_jac true',return_jac_super_list(input_true_pysm_beta,fun,P_d,P_t,P_s,pixel_list,nside,jac)
+
+
 
                     # sys.exit()
-                for i in range(pixel_number):
-                    input_beta_zeroth_iteration.append(minimization_result_pixel[i][0])
-                    print comp_sep_result_pixel[i][0]
-                    input_beta_zeroth_iteration_comp_sep.append( comp_sep_result_pixel[i][0] )
-                for i in range(pixel_number):
-                    input_beta_zeroth_iteration.append(minimization_result_pixel[i][1])
-                    input_beta_zeroth_iteration_comp_sep.append(comp_sep_result_pixel[i][1])
-                for i in range(pixel_number):
-                    input_beta_zeroth_iteration.append(minimization_result_pixel[i][2])
-                    input_beta_zeroth_iteration_comp_sep.append(comp_sep_result_pixel[i][2])
-                minimization_result_pixel=[]
-                comp_sep_result_pixel=[]
+                    super_bounds=[]
+                    if pysm_model=='c1d1s1':
+                        # bounds=((1.45,1.7),(1.0,100),(-7.5,0.5)) #GOOOOOD ONES FOR C1D1S1 DON'T TOUCH!!!!!!!!!!
+                        for p in range(pixel_number):
+                            # super_bounds.append((1.45,1.7))
+                            super_bounds.append((1.45,1.65))
+                        for p in range(pixel_number):
+                            super_bounds.append((1.0,100))
+                            # super_bounds.append((10.0,100))
+                        for p in range(pixel_number):
+                            super_bounds.append((-7.5,0.5))
 
-                map_bd,map_bt,map_bs=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s,nside)
-                map_bd_comp_sep,map_bt_comp_sep,map_bs_comp_sep=patch_map(input_beta_zeroth_iteration_comp_sep,P_d,P_t,P_s,nside)
+                    # print 'return_jac_super_list', return_jac_super_list(input_true_pysm_beta,fun,P_d,P_t,P_s,pixel_list,nside)
+                    # sys.exit()
+                    input_set_of_betas_jsl_test=scipy.optimize.minimize(joint_spectral_likelihood,input_set_of_betas,(fun,P_d,P_t,P_s,pixel_list,nside,return_jac_super_list), tol=1e-18,bounds=super_bounds,jac=return_jac_super_list)
+                    print 'minimization',input_set_of_betas_jsl_test
+                    input_set_of_betas_jsl_test=input_set_of_betas_jsl_test.x
+                    map_bd_jsl_test,map_bt_jsl_test,map_bs_jsl_test=patch_map(input_set_of_betas_jsl_test,P_d,P_t,P_s,nside)
+                    # sys.exit()
+                    print 'super_jac minimization',return_jac_super_list(input_set_of_betas_jsl_test,fun,P_d,P_t,P_s,pixel_list,nside,jac)
+                    map_bd_list_jsl_test.append(map_bd_jsl_test)
+                    map_bt_list_jsl_test.append(map_bt_jsl_test)
+                    map_bs_list_jsl_test.append(map_bs_jsl_test)
 
-                print 'fun pixel_test', fun[pixel_test]([map_bd[pixel_test],map_bt[pixel_test],map_bs[pixel_test]])
-                print 'betas pixel_test',[map_bd[pixel_test],map_bt[pixel_test],map_bs[pixel_test]]
-                print 'map_bt',map_bt
-                # sys.exit()
-                # print 'map_bt',map_bt
-                fisher_list,s_q_00,s_q_10,s_q_20,s_q_01,s_q_11,s_q_21,s_list,nnt_list,fisher_s_list,fisher_n_list,fisher_hess_list=fisher_pixel(map_bd,map_bt,map_bs,fun,pixel_list,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB,Hessian=True)
+                if likelihood_comparison==True:
+                    figl, axl = plt.subplots(2,  tight_layout=True)
 
-                map_bd_list.append(map_bd)
-                map_bt_list.append(map_bt)
-                map_bs_list.append(map_bs)
+                    beta_t_range=np.linspace(15,35,500)
+                    fun_list_normal=np.zeros(len(beta_t_range))
+                    fun_list_jsl=np.zeros(len(beta_t_range))
+                    khi_list_normal=np.zeros(len(beta_t_range))
+                    khi_list_jsl=np.zeros(len(beta_t_range))
 
-                map_bd_list_comp_sep.append(map_bd_comp_sep)
-                map_bt_list_comp_sep.append(map_bt_comp_sep)
-                map_bs_list_comp_sep.append(map_bs_comp_sep)
+                    input_true_pysm_beta=[]
+                    for l in pixel_list:
+                        input_true_pysm_beta.append(map_beta_dust_pysm[l])
+                    for l in pixel_list:
+                        input_true_pysm_beta.append(map_temp_dust_pysm[l])
+                    for l in pixel_list:
+                        input_true_pysm_beta.append(map_beta_sync_pysm[l])
+
+                    # pixel=np.argmax(np.abs ( np.array(input_set_of_betas_jsl_test[len(P_d):len(P_d)+len(P_t)]) - np.array(input_true_pysm_beta[len(P_d):len(P_d)+len(P_t)])) )
+                    pixel=np.argmin( np.array(input_set_of_betas_jsl_test[len(P_d):len(P_d)+len(P_t)]) )
+                    print 'pixel=',pixel
+
+
+                    import itertools
+                    print '[map_bd[pixel_list[pixel]],map_bt[pixel_list[pixel]],map_bs[pixel_list[pixel]]]',[map_bd[pixel_list[pixel]],map_bt[pixel_list[pixel]],map_bs[pixel_list[pixel]]]
+                    print '[input_set_of_betas_jsl_test[pixel],input_set_of_betas_jsl_test[pixel_number+pixel],input_set_of_betas_jsl_test[2*pixel_number+pixel]',[input_set_of_betas_jsl_test[pixel],input_set_of_betas_jsl_test[len(P_d)+pixel],input_set_of_betas_jsl_test[len(P_d)+len(P_t) +pixel]]
+                    print 'true betas pixel=',[map_beta_dust_pysm[pixel_list[pixel]] , map_temp_dust_pysm[pixel_list[pixel]] , map_beta_sync_pysm[pixel_list[pixel]] ]
+                    for x in range(len(beta_t_range)):
+                        # fun_list_normal[x]=(-1./2.)*fun[pixel_list[pixel]]([map_bd[pixel_list[pixel]],beta_t_range[x],map_bs[pixel_list[pixel]]])
+                        # fun_list_jsl[x]=joint_spectral_likelihood(list(itertools.chain.from_iterable([input_set_of_betas_jsl_test[:pixel_number+pixel],[beta_t_range[x]],input_set_of_betas_jsl_test[pixel_number+pixel:]])),fun,P_d,P_t,P_s,pixel_list,nside,jac)
+
+                        # fun_list_normal[x]=(-1./2.)*fun[pixel_list[pixel]]([map_beta_dust_pysm[pixel_list[pixel]],beta_t_range[x],map_beta_sync_pysm[pixel_list[pixel]]])
+                        # fun_list_jsl[x]=(-1./2.)*joint_spectral_likelihood(list(itertools.chain.from_iterable([input_true_pysm_beta[:pixel_number+pixel],[beta_t_range[x]],input_true_pysm_beta[pixel_number+pixel:]])),P_d,P_t,P_s,pixel_list,nside)
+
+                        khi_list_normal[x]=fun[pixel_list[pixel]]([map_beta_dust_pysm[pixel_list[pixel]],beta_t_range[x],map_beta_sync_pysm[pixel_list[pixel]]])
+                        khi_list_jsl[x]=joint_spectral_likelihood(list(itertools.chain.from_iterable([input_true_pysm_beta[:len(P_d)+pixel],[beta_t_range[x]],input_true_pysm_beta[len(P_d)+pixel:]])),fun,P_d,P_t,P_s,pixel_list,nside,jac)
+
+                        fun_list_normal[x]=(-1./2.)*fun[pixel_list[pixel]]([map_beta_dust_pysm[pixel_list[pixel]],beta_t_range[x],map_beta_sync_pysm[pixel_list[pixel]]])
+                        fun_list_jsl[x]=(-1./2.)*joint_spectral_likelihood(list(itertools.chain.from_iterable([input_true_pysm_beta[:len(P_d)+pixel],[beta_t_range[x]],input_true_pysm_beta[len(P_d)+pixel:]])),fun,P_d,P_t,P_s,pixel_list,nside,jac)
+
+                        # fun_list_normal[x]=(-1./2.)*fun[pixel_list[pixel]]([1.54,beta_t_range[x],-3.1])
+                        # fun_list_jsl[x]=(-1./2.)*joint_spectral_likelihood(list(itertools.chain.from_iterable([input_set_of_betas[:pixel_number+pixel],[beta_t_range[x]],input_set_of_betas[pixel_number+pixel:]])),P_d,P_t,P_s,pixel_list,nside)
+                    # print 'input',list(itertools.chain.from_iterable([input_set_of_betas[:pixel_number+pixel],[beta_t_range[x]],input_set_of_betas[pixel_number+pixel:]]))
+                    max_fun_normal=max(fun_list_normal)
+                    max_fun_jsl=max(fun_list_jsl)
+
+                    min_fun_normal=min(fun_list_normal)
+                    min_fun_jsl=min(fun_list_jsl)
+
+
+                    max_khi_normal=max(khi_list_normal)
+                    max_khi_jsl=max(khi_list_jsl)
+
+                    min_khi_normal=min(khi_list_normal)
+                    min_khi_jsl=min(khi_list_jsl)
+
+                    print 'max_fun_normal',max_fun_normal
+                    print 'max_fun_jsl',max_fun_jsl
+
+                    fun_list_normal_plot=np.zeros(len(beta_t_range))
+                    fun_list_jsl_plot=np.zeros(len(beta_t_range))
+
+                    for x in range(len(beta_t_range)):
+                        fun_list_normal_plot[x]=np.exp(fun_list_normal[x]-max_fun_normal)
+                        fun_list_jsl_plot[x]=np.exp(fun_list_jsl[x]-max_fun_jsl)
+                    # max_fun_list_jsl_plot=max(fun_list_jsl_plot)
+                    #
+                    # norm_fun_list_jsl_plot=np.zeros(len(beta_t_range))
+                    # for x in range(len(beta_t_range)):
+                    #     norm_fun_list_jsl_plot[x]=fun_list_jsl_plot[x]/max_fun_list_jsl_plot
+
+                    # axl.plot(beta_t_range,fun_list_normal_plot,label='normal')
+                    # axl.plot(beta_t_range,fun_list_jsl_plot,label='jsl')
+                    axl[0].plot(beta_t_range,khi_list_normal-min_khi_normal,label='khi2 normal')
+                    axl[0].plot(beta_t_range,khi_list_jsl-min_khi_jsl,label='khi2 jsl')
+                    axl[0].set_title('khi2 normal vs jsl as a function of T')
+                    axl[0].set_xlabel('T')
+                    axl[0].legend()
+
+                    axl[1].plot(beta_t_range,fun_list_normal_plot,label='likelihood normal')
+                    axl[1].plot(beta_t_range,fun_list_jsl_plot,label='likelihood jsl')
+                    axl[1].set_title('likelihood normal vs jsl as a function of T')
+                    axl[1].set_xlabel('T')
+                    axl[1].legend()
+
+
+                    # plt.xscale('log')
+                    figl.show()
+
+                    # sys.exit()
+
+                if jac_comparison==True:
+
+                    figj, axj = plt.subplots(2, 2,  tight_layout=True)
+                    # pixel=np.argmax(np.abs ( np.array(input_set_of_betas_jsl_test[len(P_d):len(P_d)+len(P_t)]) - np.array(input_true_pysm_beta[len(P_d):len(P_d)+len(P_t)])) )
+                    pixel=np.argmin( np.array(input_set_of_betas_jsl_test[len(P_d):len(P_d)+len(P_t)]) )
+                    print 'pixel=',pixel
+                    beta_t_range=np.linspace(1,100,500)
+                    # jac_list_normal=np.zeros(len(beta_t_range))
+                    jac_list_jsl=np.zeros(len(beta_t_range))
+
+
+
+                    import itertools
+                    jac_list_normal=[]
+                    jac_list_jsl=[]
+
+                    print 'NORMAL',[map_bd[pixel_list[pixel]],map_bt[pixel_list[pixel]],map_bs[pixel_list[pixel]]]
+                    print 'JSL',[input_set_of_betas_jsl_test[pixel],input_set_of_betas_jsl_test[len(P_d)+pixel],input_set_of_betas_jsl_test[len(P_d)+len(P_t)+pixel]]
+                    print 'true betas pixel=',[map_beta_dust_pysm[pixel_list[pixel]] , map_temp_dust_pysm[pixel_list[pixel]] , map_beta_sync_pysm[pixel_list[pixel]] ]
+                    for x in range(len(beta_t_range)):
+                        # print 'jac_list[pixel]([map_beta_dust_pysm[pixel_list[pixel]],beta_t_range[x],map_beta_sync_pysm[pixel_list[pixel]]])',jac_list[pixel]([map_beta_dust_pysm[pixel_list[pixel]],beta_t_range[x],map_beta_sync_pysm[pixel_list[pixel]]])
+                        jac_list_normal.append(jac_list[pixel]([map_beta_dust_pysm[pixel_list[pixel]],beta_t_range[x],map_beta_sync_pysm[pixel_list[pixel]]]))
+                        # jac_list_normal.append([1,2,3])
+                        jac_list_jsl.append(return_jac_super_list(list(itertools.chain.from_iterable([input_true_pysm_beta[:len(P_d)+pixel],[beta_t_range[x]],input_true_pysm_beta[len(P_d)+pixel:]])),fun,P_d,P_t,P_s,pixel_list,nside,jac))
+
+                    jac_list_normal_0=[]
+                    jac_list_jsl_0=[]
+                    for element in jac_list_normal:
+                        jac_list_normal_0.append(element[0])
+                    for element in jac_list_jsl:
+                        jac_list_jsl_0.append(element[0])
+
+                    jac_list_normal_1=[]
+                    jac_list_jsl_1=[]
+                    for element in jac_list_normal:
+                        jac_list_normal_1.append(element[1])
+                    for element in jac_list_jsl:
+                        jac_list_jsl_1.append(element[1])
+
+                    jac_list_normal_2=[]
+                    jac_list_jsl_2=[]
+                    for element in jac_list_normal:
+                        jac_list_normal_2.append(element[2])
+                    for element in jac_list_jsl:
+                        jac_list_jsl_2.append(element[2])
+
+                    axj[0][0].plot(beta_t_range,jac_list_normal_0,label='jac normal')
+                    axj[0][0].plot(beta_t_range,jac_list_jsl_0,label='jac jsl')
+                    axj[0][1].plot(beta_t_range,jac_list_normal_1,label='jac normal')
+                    axj[0][1].plot(beta_t_range,jac_list_jsl_1,label='jac jsl')
+                    axj[1][0].plot(beta_t_range,jac_list_normal_2,label='ja] normal')
+                    axj[1][0].plot(beta_t_range,jac_list_jsl_2,label='jac jsl')
+                    axj[0][0].set_title('jac[0] normal vs jsl as 2a function of T')
+                    axj[0][1].set_title('jac[1] normal vs jsl as a function of T')
+                    axj[1][0].set_title('jac[2] normal vs jsl as a function of T')
+                    axj[0][0].set_xlabel('T')
+                    axj[0][1].set_xlabel('T')
+                    axj[1][0].set_xlabel('T')
+                    axj[0][0].legend()
+                    axj[0][1].legend()
+                    axj[1][0].legend()
+                    # plt.xscale('log')
+                    figj.show()
+
 
             if len(params)==2:
                 print '2 PARAMS !!'
@@ -1308,66 +1708,192 @@ if nside_comparison_for_fine_tuning==True:
 
 
 
-            """
-            axs[0][0].hist([ (map_bd[x] - map_beta_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise d histogram iteration#=%s'%iter)#bins = np.logspace(-3,3,num=100)
-            axs[0][1].hist([ (map_bt[x] - map_temp_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise t histogram iteration#=%s'%iter)
-            axs[1][0].hist([ (map_bs[x] - map_beta_sync_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise s histogram iteration#=%s'%iter)
 
-            axs[0][0].axvline(x=np.mean([ (map_bd[x] - map_beta_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ]),ymin=0,ymax=npix/2)
-            axs[0][1].axvline(x=np.mean([ (map_bt[x] - map_temp_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ]),ymin=0,ymax=npix/2)
-            axs[1][0].axvline(x=np.mean([ (map_bs[x] - map_beta_sync_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ]),ymin=0,ymax=npix/2)
+            if plot_res_to_noise==True and zeroth_iteration==True:
+                if pysm_model=='c1d1s1':
+                    cmap = plt.get_cmap('jet_r')
+                    color = cmap(1./nside)
 
-            axs[0][0].set_title('residuals/noise nside=%s'%nside)
-            axs[0][1].set_title('residuals/noise nside=%s'%nside)
-            axs[1][0].set_title('residuals/noise nside=%s'%nside)
-            # axs[0][0].set_xscale('log')
-            # axs[0][1].set_xscale('log')
-            # axs[1][0].set_xscale('log')
+                    ax_signal_to_noise[0][0].hist([ (map_bd[x] - map_beta_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)#bins = np.logspace(-3,3,num=100)
+                    ax_signal_to_noise[0][1].hist([ (map_bt[x] - map_temp_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)
+                    ax_signal_to_noise[1][0].hist([ (map_bs[x] - map_beta_sync_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)
+
+                    ax_signal_to_noise[0][0].axvline(x=np.mean([ (map_bd[x] - map_beta_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+                    ax_signal_to_noise[0][1].axvline(x=np.mean([ (map_bt[x] - map_temp_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+                    ax_signal_to_noise[1][0].axvline(x=np.mean([ (map_bs[x] - map_beta_sync_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
 
 
-            # plt.gca().set_xscale("log")
-            # plt.gca().set_xscale("log")
-            # plt.gca().set_xscale("log")
-            """
+
+                if pysm_model=='d0s0':
+                    ax_signal_to_noise[0][0].hist([ (map_bd[x] - 1.54 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise d histogram iteration#=%s'%iter)#bins = np.logspace(-3,3,num=100)
+                    ax_signal_to_noise[0][1].hist([ (map_bt[x] - 20 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise t histogram iteration#=%s'%iter)
+                    ax_signal_to_noise[1][0].hist([ (map_bs[x] - (-3) ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise s histogram iteration#=%s'%iter)
+
+                    ax_signal_to_noise[0][0].axvline(x=np.mean([ (map_bd[x] - 1.54 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ]),ymin=0,ymax=npix/2)
+                    ax_signal_to_noise[0][1].axvline(x=np.mean([ (map_bt[x] - 20 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ]),ymin=0,ymax=npix/2)
+                    ax_signal_to_noise[1][0].axvline(x=np.mean([ (map_bs[x] - (-3) ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ]),ymin=0,ymax=npix/2)
+
+                ax_signal_to_noise[0][0].legend()
+                ax_signal_to_noise[0][1].legend()
+                ax_signal_to_noise[1][0].legend()
+
+                ax_signal_to_noise[0][0].set_title('residuals_norm/noise dust')
+                ax_signal_to_noise[0][1].set_title('residuals_norm/noise temp')
+                ax_signal_to_noise[1][0].set_title('residuals_norm/noise sync')
+                # axs[0][0].set_xscale('log')
+                # axs[0][1].set_xscale('log')
+                # axs[1][0].set_xscale('log')
+
+
+                # plt.gca().set_xscale("log")
+                # plt.gca().set_xscale("log")
+                # plt.gca().set_xscale("log")
+
+            if plot_signal_to_noise==True and joint_likelihood_test==True:
+                if pysm_model=='c1d1s1':
+                    cmap = plt.get_cmap('jet_r')
+                    color = cmap(1./nside)
+
+                    ax_signal_to_noise_jsl[0][0].hist([ (map_bd_jsl_test[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)#bins = np.logspace(-3,3,num=100)
+                    ax_signal_to_noise_jsl[0][1].hist([ (map_bt_jsl_test[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)
+                    ax_signal_to_noise_jsl[1][0].hist([ (map_bs_jsl_test[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)
+
+                    ax_signal_to_noise_jsl[0][0].axvline(x=np.mean([ (map_bd_jsl_test[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+                    ax_signal_to_noise_jsl[0][1].axvline(x=np.mean([ (map_bt_jsl_test[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+                    ax_signal_to_noise_jsl[1][0].axvline(x=np.mean([ (map_bs_jsl_test[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+
+                ax_signal_to_noise_jsl[0][0].legend()
+                ax_signal_to_noise_jsl[0][1].legend()
+                ax_signal_to_noise_jsl[1][0].legend()
+
+                ax_signal_to_noise_jsl[0][0].set_title('signal_jsl/noise dust')
+                ax_signal_to_noise_jsl[0][1].set_title('signal_jsl/noise temp')
+                ax_signal_to_noise_jsl[1][0].set_title('signal_jsl/noise sync')
+
+            if plot_res_to_noise==True and joint_likelihood_test==True:
+                if pysm_model=='c1d1s1':
+                    cmap = plt.get_cmap('jet_r')
+                    color = cmap(1./nside)
+
+                    ax_res_to_noise_jsl[0][0].hist([ (map_bd_jsl_test[x] - map_beta_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)#bins = np.logspace(-3,3,num=100)
+                    ax_res_to_noise_jsl[0][1].hist([ (map_bt_jsl_test[x] - map_temp_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)
+                    ax_res_to_noise_jsl[1][0].hist([ (map_bs_jsl_test[x] - map_beta_sync_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ] ,pixel_number, histtype='step', label='%s'%nside,normed=True)#,color=color)
+
+                    ax_res_to_noise_jsl[0][0].axvline(x=np.mean([ (map_bd_jsl_test[x] - map_beta_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+                    ax_res_to_noise_jsl[0][1].axvline(x=np.mean([ (map_bt_jsl_test[x] - map_temp_dust_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+                    ax_res_to_noise_jsl[1][0].axvline(x=np.mean([ (map_bs_jsl_test[x] - map_beta_sync_pysm[x] ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ]),ymin=0,ymax=npix/2, label='mean %s'%nside,color=color)
+
+
+
+                if pysm_model=='d0s0':
+                    ax_res_to_noise_jsl[0][0].hist([ (map_bd_jsl_test[x] - 1.54 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise d histogram iteration#=%s'%iter)#bins = np.logspace(-3,3,num=100)
+                    ax_res_to_noise_jsl[0][1].hist([ (map_bt_jsl_test[x] - 20 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise t histogram iteration#=%s'%iter)
+                    ax_res_to_noise_jsl[1][0].hist([ (map_bs_jsl_test[x] - (-3) ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ] ,pixel_number, histtype='step', label='signal/noise s histogram iteration#=%s'%iter)
+
+                    ax_res_to_noise_jsl[0][0].axvline(x=np.mean([ (map_bd_jsl_test[x] - 1.54 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[0][0])) for x in pixel_list ]),ymin=0,ymax=npix/2)
+                    ax_res_to_noise_jsl[0][1].axvline(x=np.mean([ (map_bt_jsl_test[x] - 20 ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[1][1])) for x in pixel_list ]),ymin=0,ymax=npix/2)
+                    ax_res_to_noise_jsl[1][0].axvline(x=np.mean([ (map_bs_jsl_test[x] - (-3) ) /  np.array( np.sqrt(np.linalg.inv(fisher_list[x])[2][2])) for x in pixel_list ]),ymin=0,ymax=npix/2)
+
+                ax_res_to_noise_jsl[0][0].legend()
+                ax_res_to_noise_jsl[0][1].legend()
+                ax_res_to_noise_jsl[1][0].legend()
+
+                ax_res_to_noise_jsl[0][0].set_title('residuals_jsl/noise dust')
+                ax_res_to_noise_jsl[0][1].set_title('residuals_jsl/noise temp')
+                ax_res_to_noise_jsl[1][0].set_title('residuals_jsl/noise sync')
 
             del instrument,self
         # print 'map_bd_list',map_bd_list[:][1]
         #----------------------------C1D1S1:
         # print 'np.mean(map_bd_list,axis=0)',np.mean([[map_bd_list[x][y] for y in pixel_list] for x in range(len(map_bd_list))],axis=0)
-        # axs[0][0].hist([np.mean([[map_bd_list[x][y] for y in pixel_list] for x in range(len(map_bd_list))],axis=0)[pixel_list.index(z)] - map_beta_dust_pysm[z] for z in pixel_list],pixel_number,label='mean_beta - beta_true dust')
-        # axs[0][1].hist([np.mean([[map_bt_list[x][y] for y in pixel_list] for x in range(len(map_bt_list))],axis=0)[pixel_list.index(z)] - map_temp_dust_pysm[z] for z in pixel_list],pixel_number,label='mean_beta - beta_true temp')
-        # axs[1][0].hist([np.mean([[map_bs_list[x][y] for y in pixel_list] for x in range(len(map_bs_list))],axis=0)[pixel_list.index(z)] - map_beta_sync_pysm[z] for z in pixel_list],pixel_number,label='mean_beta - beta_true sync')
 
-        #-----------------------------S0D0 :
-        axs[0][0].hist([np.mean([[map_bd_list[x][y] for y in pixel_list] for x in range(len(map_bd_list))],axis=0)[pixel_list.index(z)] - 1.54 for z in pixel_list],pixel_number,label='mean_beta - beta_true dust')
-        axs[0][1].hist([np.mean([[map_bt_list[x][y] for y in pixel_list] for x in range(len(map_bt_list))],axis=0)[pixel_list.index(z)] - 20 for z in pixel_list],pixel_number,label='mean_beta - beta_true temp')
-        axs[1][0].hist([np.mean([[map_bs_list[x][y] for y in pixel_list] for x in range(len(map_bs_list))],axis=0)[pixel_list.index(z)] - (-3) for z in pixel_list],pixel_number,label='mean_beta - beta_true sync')
+        if plot_joint_likelihood_test==True and joint_likelihood_test==True:
+            if pysm_model=='c1d1s1':
+                ax_res_jsl[0][0].hist([np.mean([[map_bd_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bd_list_jsl_test))],axis=0)[pixel_list.index(z)] - map_beta_dust_pysm[z] for z in pixel_list],pixel_number/10)
+                ax_res_jsl[0][1].hist([np.mean([[map_bt_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bt_list_jsl_test))],axis=0)[pixel_list.index(z)] - map_temp_dust_pysm[z] for z in pixel_list],pixel_number/10)
+                ax_res_jsl[1][0].hist([np.mean([[map_bs_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bs_list_jsl_test))],axis=0)[pixel_list.index(z)] - map_beta_sync_pysm[z] for z in pixel_list],pixel_number/10)
+
+            #-----------------------------S0D0 :
+            if pysm_model=='d0s0':
+                ax_res_jsl[0][0].hist([np.mean([[map_bd_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bd_list_jsl_test))],axis=0)[pixel_list.index(z)] - 1.54 for z in pixel_list],pixel_number/10)
+                ax_res_jsl[0][1].hist([np.mean([[map_bt_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bt_list_jsl_test))],axis=0)[pixel_list.index(z)] - 20 for z in pixel_list],pixel_number/10)
+                ax_res_jsl[1][0].hist([np.mean([[map_bs_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bs_list_jsl_test))],axis=0)[pixel_list.index(z)] - (-3) for z in pixel_list],pixel_number/10)
 
 
-        axs[0][0].set_title('mean_beta - beta_true dust')
-        axs[0][1].set_title('mean_beta - beta_true temp')
-        axs[1][0].set_title('mean_beta - beta_true sync')
+            ax_res_jsl[0][0].set_title('mean_beta_jsl - beta_true dust')
+            ax_res_jsl[0][1].set_title('mean_beta_jsl - beta_true temp')
+            ax_res_jsl[1][0].set_title('mean_beta_jsl - beta_true sync')
+
+            fig_res_jsl.show()
+
+        if plot_histo_residu==True and zeroth_iteration==True:
+            if pysm_model=='c1d1s1':
+                ax_res_norm[0][0].hist([np.mean([[map_bd_list[x][y] for y in pixel_list] for x in range(len(map_bd_list))],axis=0)[pixel_list.index(z)] - map_beta_dust_pysm[z] for z in pixel_list],pixel_number/10)
+                ax_res_norm[0][1].hist([np.mean([[map_bt_list[x][y] for y in pixel_list] for x in range(len(map_bt_list))],axis=0)[pixel_list.index(z)] - map_temp_dust_pysm[z] for z in pixel_list],pixel_number/10)
+                ax_res_norm[1][0].hist([np.mean([[map_bs_list[x][y] for y in pixel_list] for x in range(len(map_bs_list))],axis=0)[pixel_list.index(z)] - map_beta_sync_pysm[z] for z in pixel_list],pixel_number/10)
+
+            #-----------------------------S0D0 :
+            if pysm_model=='d0s0':
+                ax_res_norm[0][0].hist([np.mean([[map_bd_list[x][y] for y in pixel_list] for x in range(len(map_bd_list))],axis=0)[pixel_list.index(z)] - 1.54 for z in pixel_list],pixel_number/10)
+                ax_res_norm[0][1].hist([np.mean([[map_bt_list[x][y] for y in pixel_list] for x in range(len(map_bt_list))],axis=0)[pixel_list.index(z)] - 20 for z in pixel_list],pixel_number/10)
+                ax_res_norm[1][0].hist([np.mean([[map_bs_list[x][y] for y in pixel_list] for x in range(len(map_bs_list))],axis=0)[pixel_list.index(z)] - (-3) for z in pixel_list],pixel_number/10)
+
+
+            ax_res_norm[0][0].set_title('mean_beta_norm - beta_true dust')
+            ax_res_norm[0][1].set_title('mean_beta_norm - beta_true temp')
+            ax_res_norm[1][0].set_title('mean_beta_norm - beta_true sync')
+
+            fig_res_norm.show()
+
+        if plot_histo_residu_normal_and_jsl==True and joint_likelihood_test==True:
+            if pysm_model=='c1d1s1':
+                ax_res_norm_and_jsl[0][0].hist([np.mean([[map_bd_list[x][y] for y in pixel_list] for x in range(len(map_bd_list))],axis=0)[pixel_list.index(z)] - map_beta_dust_pysm[z] for z in pixel_list],bins = np.linspace(-0.2, 0.2, num=20),label='normal method',histtype='step')
+                ax_res_norm_and_jsl[0][1].hist([np.mean([[map_bt_list[x][y] for y in pixel_list] for x in range(len(map_bt_list))],axis=0)[pixel_list.index(z)] - map_temp_dust_pysm[z] for z in pixel_list],bins = np.linspace(-8, 8, num=20),label='normal method',histtype='step')
+                ax_res_norm_and_jsl[1][0].hist([np.mean([[map_bs_list[x][y] for y in pixel_list] for x in range(len(map_bs_list))],axis=0)[pixel_list.index(z)] - map_beta_sync_pysm[z] for z in pixel_list],bins = np.linspace(-2, 2, num=20),label='normal method',histtype='step')
+                ax_res_norm_and_jsl[0][0].hist([np.mean([[map_bd_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bd_list_jsl_test))],axis=0)[pixel_list.index(z)] - map_beta_dust_pysm[z] for z in pixel_list],bins = np.linspace(-0.2, 0.2, num=20),label='jsl',histtype='step')
+                ax_res_norm_and_jsl[0][1].hist([np.mean([[map_bt_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bt_list_jsl_test))],axis=0)[pixel_list.index(z)] - map_temp_dust_pysm[z] for z in pixel_list],bins = np.linspace(-8, 8, num=20),label='jsl',histtype='step')
+                ax_res_norm_and_jsl[1][0].hist([np.mean([[map_bs_list_jsl_test[x][y] for y in pixel_list] for x in range(len(map_bs_list_jsl_test))],axis=0)[pixel_list.index(z)] - map_beta_sync_pysm[z] for z in pixel_list],bins = np.linspace(-2, 2, num=20),label='jsl',histtype='step')
+
+                ax_res_norm_and_jsl[0][0].set_title('mean_beta - beta_true dust')
+                ax_res_norm_and_jsl[0][1].set_title('mean_beta - beta_true temp')
+                ax_res_norm_and_jsl[1][0].set_title('mean_beta - beta_true sync')
+                ax_res_norm_and_jsl[0][0].legend()
+                ax_res_norm_and_jsl[0][1].legend()
+                ax_res_norm_and_jsl[1][0].legend()
+
+            fig_res_norm_and_jsl.show()
+
+    if plot_signal_to_noise==True and zeroth_iteration==True:
+
+        fig_signal_to_noise.show()
+
+    if plot_res_to_noise==True and joint_likelihood_test==True:
+        fig_res_to_noise_jsl.show()
+    if plot_signal_to_noise==True and joint_likelihood_test==True:
+        fig_signal_to_noise_jsl.show()
         # plt.title('residuals/noise nside=%s'%nside)
 
 
-        axs_comp_sep[0][0].hist([np.mean([[map_bd_list_comp_sep[x][y] for y in pixel_list] for x in range(len(map_bd_list_comp_sep))],axis=0)[pixel_list.index(z)] - 1.54 for z in pixel_list],pixel_number,label='mean_beta - beta_true dust')
-        axs_comp_sep[0][1].hist([np.mean([[map_bt_list_comp_sep[x][y] for y in pixel_list] for x in range(len(map_bt_list_comp_sep))],axis=0)[pixel_list.index(z)] - 20 for z in pixel_list],pixel_number,label='mean_beta - beta_true temp')
-        axs_comp_sep[1][0].hist([np.mean([[map_bs_list_comp_sep[x][y] for y in pixel_list] for x in range(len(map_bs_list_comp_sep))],axis=0)[pixel_list.index(z)] - (-3) for z in pixel_list],pixel_number,label='mean_beta - beta_true sync')
-
-
-        axs_comp_sep[0][0].set_title('mean_beta - beta_true dust comp_sep')
-        axs_comp_sep[0][1].set_title('mean_beta - beta_true temp comp_sep')
-        axs_comp_sep[1][0].set_title('mean_beta - beta_true sync comp_sep')
+        # axs_comp_sep[0][0].hist([np.mean([[map_bd_list_comp_sep[x][y] for y in pixel_list] for x in range(len(map_bd_list_comp_sep))],axis=0)[pixel_list.index(z)] - 1.54 for z in pixel_list],pixel_number,label='mean_beta - beta_true dust')
+        # axs_comp_sep[0][1].hist([np.mean([[map_bt_list_comp_sep[x][y] for y in pixel_list] for x in range(len(map_bt_list_comp_sep))],axis=0)[pixel_list.index(z)] - 20 for z in pixel_list],pixel_number,label='mean_beta - beta_true temp')
+        # axs_comp_sep[1][0].hist([np.mean([[map_bs_list_comp_sep[x][y] for y in pixel_list] for x in range(len(map_bs_list_comp_sep))],axis=0)[pixel_list.index(z)] - (-3) for z in pixel_list],pixel_number,label='mean_beta - beta_true sync')
+        #
+        #
+        # axs_comp_sep[0][0].set_title('mean_beta - beta_true dust comp_sep')
+        # axs_comp_sep[0][1].set_title('mean_beta - beta_true temp comp_sep')
+        # axs_comp_sep[1][0].set_title('mean_beta - beta_true sync comp_sep')
         # plt.title('residuals/noise nside=%s'%nside)
-        plt.show(fig)
-        plt.show(fig_comp_sep)
 
+        # plt.show(fig_comp_sep)
+    plt.show()
     sys.exit()
 
 
-nside_comparison_jsl=False
-if nside_comparison_jsl==True:
-    sys.exit()
+# nside_comparison_jsl=False
+# if nside_comparison_jsl==True:
+    # sys.exit()
+
+
 
 #-----------------------------------------------ZEROTH ITERATION----------------------------------------------------------------------
 P_d=[]
@@ -1392,11 +1918,15 @@ for i in range(len(freq_maps[0][0])):
 # bounds=((0.5,2.5),(0.1,None),(-8,4))
 # bounds=((0,10),(0,25),(-10,0))
 # bounds=((0,None),(0,None),(None,0))
-bounds=((1.0, 5.0),(15,25),(-3.5,-2.0))
+# bounds=((1.0, 5.0),(15,25),(-3.5,-2.0))
 # bounds = []
 # bounds.append( (1.0, 5.0) )
 # bounds.append( (1.0, 40.0) )
 # bounds.append( (-3.5, -2.0) )
+if pysm_model=='c1d1s1':
+    bounds=((1.45,1.7),(1.0,100),(-7.5,0.5)) #GOOOOOD ONES FOR C1D1S1 DON'T TOUCH!!!!!!!!!!
+if pysm_model=='d0s0':
+    bounds=((0.5,2.5),(1.0,75),(-7.5,0.5)) # Not the best one yet, needs some more fine tuning
 
 fun=[]
 last_values=[]
@@ -1409,13 +1939,15 @@ A_dB_ev, comp_of_dB = fgal._A_dB_ev_and_comp_of_dB_as_compatible_list(A_dB_ev, c
 
 fun=[None]*hp.nside2npix(nside)
 last_values=[None]*hp.nside2npix(nside)
+jac_list=[]
 
 for l in range(pixel_number):
      # prewhitened_data = prewhiten_factors * np.transpose(freq_maps)[l]
      # print 'np.transpose(freq_maps)[%s]'%l,np.transpose(freq_maps)[l]
      # fun[pixel_list[l]] = lambda x: -fgal.logL(A_ev(x), np.transpose(freq_maps)[l],np.diag(prewhiten_factors**2))#np.transpose(freq_maps)[l], np.diag(prewhiten_factors**2))
      # fun_test.append(lambda x: -fgal.logL(A_ev(x), np.transpose(freq_maps)[l],np.diag(prewhiten_factors**2)))
-     fun[pixel_list[l]] = return_fun(l,freq_maps,prewhiten_factors)
+     fun[pixel_list[l]] = return_fun(l,freq_maps,prewhiten_factors,A_ev)
+     jac_list.append(return_jac(l,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB))
      # print 'fun',fun
      # print 'fun[pixel_list[l]]',fun[pixel_list[l]]([input_set_of_betas[150],input_set_of_betas[150+pixel_number],input_set_of_betas[150+2*pixel_number]])
      # last_values[pixel_list[l]]=last_valuestemp
@@ -1434,7 +1966,9 @@ comp=[]
 minimization_result_pixel=[]
 input_beta_zeroth_iteration=[]
 for p in range(pixel_number):
-    minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],([input_set_of_betas[p],input_set_of_betas[p+pixel_number],input_set_of_betas[p+2*pixel_number]]),bounds=bounds).x)
+    # minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],([input_set_of_betas[p],input_set_of_betas[p+len(P_d)],input_set_of_betas[p+len(P_d)+len(P_t)]]),bounds=bounds).x)
+    minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],np.array([input_set_of_betas[p],input_set_of_betas[p+len(P_d)],input_set_of_betas[p+len(P_d)+len(P_t)]]),\
+    jac=jac_list[p], tol=1e-18,bounds=bounds).x)
     """
     for i in range(3):
         if ((minimization_result_pixel[-1][i] == bounds[i][0]) or\
@@ -1537,17 +2071,17 @@ map_bd_new_beta2,map_bt_new_beta2,map_bs_new_beta2=patch_map(beta2_patch_list,P_
 #---------------------------------------------------------new beta estimation over patches and corresponding map display------------------------------------
 input_set_of_betas_new_test=[]
 for i in range(len(P_d_test)):
-    input_set_of_betas_new_test.append(np.mean([map_bd[x] for x in P_d[i]]))
+    input_set_of_betas_new_test.append(np.mean([map_bd[x] for x in P_d_test[i]]))
 for i in range(len(P_t_test)):
-    input_set_of_betas_new_test.append(np.mean([map_bt[x] for x in P_t[i]]))
+    input_set_of_betas_new_test.append(np.mean([map_bt[x] for x in P_t_test[i]]))
 for i in range(len(P_s_test)):
-    input_set_of_betas_new_test.append(np.mean([map_bs[x] for x in P_s[i]]))
+    input_set_of_betas_new_test.append(np.mean([map_bs[x] for x in P_s_test[i]]))
 
 minimization=False
 
 if minimization==True:
     print 'input_set_of_betas_new_test shape',np.shape(input_set_of_betas_new_test)
-    new_set_of_beta_test=scipy.optimize.minimize(joint_spectral_likelihood,input_set_of_betas_new_test,(P_d_test,P_t_test,P_s_test,pixel_list,nside)).x
+    new_set_of_beta_test=scipy.optimize.minimize(joint_spectral_likelihood,input_set_of_betas_new_test,(fun,P_d_test,P_t_test,P_s_test,pixel_list,nside)).x
     print 'new_set_of_beta_test',new_set_of_beta_test
     map_bd_test,map_bt_test,map_bs_test=patch_map(new_set_of_beta_test,P_d_test,P_t_test,P_s_test,nside)
     # else:
@@ -1589,7 +2123,7 @@ if minimization==True:
 if minimization==True:
     index_list=[]
     temp_list5=[]
-    binsd=np.linspace(np.amin(input_beta_zeroth_iteration[:pixel_number]),np.amax(input_beta_zeroth_iteration[:pixel_number]),pixel_number)
+    binsd=np.linspace(np.amin(input_beta_zeroth_iteration[:len(P_d)]),np.amax(input_beta_zeroth_iteration[:len(P_d)]),pixel_number)
     for j in range(len(P_d_test)):
         for l in range(len(P_d_test[j])):
             index_list.append(pixel_list.index(P_d_test[j][l]))
@@ -1599,11 +2133,11 @@ if minimization==True:
     plt.title('B_d histogram pbyp patches')
     plt.show()
 
-    binst=np.linspace(np.amin(input_beta_zeroth_iteration[pixel_number:2*pixel_number]),np.amax(input_beta_zeroth_iteration[pixel_number:2*pixel_number]),pixel_number)
+    binst=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),np.amax(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),pixel_number)
     for j in range(len(P_t_test)):
         for l in range(len(P_t_test[j])):
             index_list.append(pixel_list.index(P_t_test[j][l]))
-            temp_list5.append(index_list[l]+pixel_number)
+            temp_list5.append(index_list[l]+len(P_d))
         plt.hist([x for x in np.array(input_beta_zeroth_iteration)[temp_list5]],binst,label='patch # %s'%j)
         temp_list5=[]
         index_list=[]
@@ -1611,11 +2145,11 @@ if minimization==True:
     plt.title('B_t histogram pbyp patches')
     plt.show()
 
-    binss=np.linspace(np.amin(input_beta_zeroth_iteration[2*pixel_number:3*pixel_number]),np.amax(input_beta_zeroth_iteration[2*pixel_number:3*pixel_number]),pixel_number)
+    binss=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),np.amax(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),pixel_number)
     for j in range(len(P_s_test)):
         for l in range(len(P_s_test[j])):
             index_list.append(pixel_list.index(P_s_test[j][l]))
-            temp_list5.append(index_list[l]+2*pixel_number)
+            temp_list5.append(index_list[l]+len(P_d)+len(P_t))
         plt.hist([x for x in np.array(input_beta_zeroth_iteration)[temp_list5]],binss,label='patch # %s'%j)
         temp_list5=[]
         index_list=[]
@@ -1834,12 +2368,12 @@ print 'p_sigmax_d=',p_sigmax_d,'    ','p_sigmax_d_index=',p_sigmax_d_index
 p_sigmax_s_index=pixel_list.index(pixel_list[p_sigmax_s])
 p_sigmax_t_index=pixel_list.index(pixel_list[p_sigmax_t])
 
-print 'new minimisation',scipy.optimize.minimize(fun[pixel_list[p_sigmax_s]],[input_set_of_betas[0],input_set_of_betas[pixel_number],input_set_of_betas[2*pixel_number]],bounds=bounds).x
+print 'new minimisation',scipy.optimize.minimize(fun[pixel_list[p_sigmax_s]],[input_set_of_betas[0],input_set_of_betas[len(P_d)],input_set_of_betas[len(P_d)+len(P_t)]],bounds=bounds).x
 print 'old minimisation',[map_d[pixel_list[p_sigmax_s]],map_t[pixel_list[p_sigmax_s]],map_s[pixel_list[p_sigmax_s]]]
 
 print ''
 print 'fun[150]',fun[150]([1.59,19.6,-3.1])
-print 'new minimisation',scipy.optimize.minimize(fun[150],[input_set_of_betas[0],input_set_of_betas[pixel_number],input_set_of_betas[2*pixel_number]],bounds=bounds).x
+print 'new minimisation',scipy.optimize.minimize(fun[150],[input_set_of_betas[0],input_set_of_betas[len(P_d)],input_set_of_betas[len(P_d)+len(P_t)]],bounds=bounds).x
 print 'old minimisation',[map_d[150],map_t[150],map_s[150]]
 
 
@@ -1949,19 +2483,19 @@ print ''
 print '_______________________________________________________________________________'
 print 'p_sigmax_t',pixel_list[p_sigmax_t]
 print 's pmax',s_list[pixel_list[p_sigmax_d]]
-print 'beta t pmax',input_beta_zeroth_iteration[pixel_number+p_sigmax_t_index]
+print 'beta t pmax',input_beta_zeroth_iteration[len(P_t)+p_sigmax_t_index]
 print 'sigma t max',np.sqrt(np.linalg.inv(fisher_list[pixel_list[p_sigmax_t]]))[1][1]
 print 'nnt_list t max', nnt_list[pixel_list[p_sigmax_t]]
 print 'fisher_list pmax',fisher_list[pixel_list[p_sigmax_t]]
 print 'inv fisher pmax',np.linalg.inv(fisher_list[pixel_list[p_sigmax_t]])
 print 'fisher s',fisher_s_list[pixel_list[p_sigmax_t]]
 print 'fisher n',fisher_n_list[pixel_list[p_sigmax_t]]
-print 'fun(p)',fun[pixel_list[p_sigmax_t]]([input_beta_zeroth_iteration[p_sigmax_t_index],input_beta_zeroth_iteration[pixel_number+p_sigmax_t_index],input_beta_zeroth_iteration[2*pixel_number+p_sigmax_t_index]])
+print 'fun(p)',fun[pixel_list[p_sigmax_t]]([input_beta_zeroth_iteration[p_sigmax_t_index],input_beta_zeroth_iteration[len(P_d)+p_sigmax_t_index],input_beta_zeroth_iteration[len(P_d)+len(P_t)+p_sigmax_t_index]])
 print ''
 print '_______________________________________________________________________________'
 print 'p_sigmax_s',pixel_list[p_sigmax_s]
 print 's pmax',s_list[pixel_list[p_sigmax_d]]
-print 'beta s pmax',input_beta_zeroth_iteration[pixel_number*2+p_sigmax_s_index]
+print 'beta s pmax',input_beta_zeroth_iteration[len(P_d)+len(P_t)+p_sigmax_s_index]
 print 'sigma s max',np.sqrt(np.linalg.inv(fisher_list[pixel_list[p_sigmax_s]]))[2][2]
 print 'nnt_list s max', nnt_list[pixel_list[p_sigmax_s]]
 print 'fisher_list pmax',fisher_list[pixel_list[p_sigmax_s]]
@@ -2004,15 +2538,15 @@ plt.show()
 
 #------------------------------------------------------------BETA HISTO------------------------------------------------------
 
-plt.hist(np.array([input_beta_zeroth_iteration[x] for x in range(pixel_number)]),pixel_number)#,binsd)
+plt.hist(np.array([input_beta_zeroth_iteration[x] for x in range(len(P_d))]),pixel_number/10)#,binsd)
 plt.title('beta_d histogram')
 plt.show()
 
-plt.hist(np.array([input_beta_zeroth_iteration[x+pixel_number] for x in range(pixel_number)]),pixel_number)#,binsd)
+plt.hist(np.array([input_beta_zeroth_iteration[x+len(P_d)] for x in range(len(P_t))]),pixel_number/10)#,binsd)
 plt.title('beta_t histogram')
 plt.show()
 
-plt.hist(np.array([input_beta_zeroth_iteration[x+pixel_number*2] for x in range(pixel_number)]),pixel_number)#,binsd)
+plt.hist(np.array([input_beta_zeroth_iteration[x+len(P_d) + len(P_t)] for x in range(len(P_s))]),pixel_number/10)#,binsd)
 plt.title('beta_s histogram')
 plt.show()
 
@@ -2021,9 +2555,9 @@ plt.show()
 np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list])
 plt.hist(input_beta_zeroth_iteration[pixel_list.index(x)]  /  np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]),pixel_number, histtype='step', label='signal/noise d histogram')#,binsd)
 
-plt.hist(input_beta_zeroth_iteration[pixel_number + pixel_list.index(x)]  /  np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='signal/noise t histogram')#,binsd)
+plt.hist(input_beta_zeroth_iteration[len(P_d) + pixel_list.index(x)]  /  np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='signal/noise t histogram')#,binsd)
 
-plt.hist(np.abs(input_beta_zeroth_iteration[pixel_number*2 + pixel_list.index(x)] ) /  np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='signal/noise s histogram')#,binsd)
+plt.hist(np.abs(input_beta_zeroth_iteration[len(P_d)+len(P_t) + pixel_list.index(x)] ) /  np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='signal/noise s histogram')#,binsd)
 plt.legend()
 plt.show()
 
@@ -2033,8 +2567,8 @@ for i in range(pixel_number):
         print 'sigma=',np.linalg.inv(fisher_list[pixel_list[i]])
         print 's_list[%s]'%pixel_list[i],s_list[pixel_list[i]]
         print 'beta_d=', input_beta_zeroth_iteration[i]
-        print 'beta_t=', input_beta_zeroth_iteration[pixel_number+i]
-        print 'beta_s=', input_beta_zeroth_iteration[2*pixel_number+i]
+        print 'beta_t=', input_beta_zeroth_iteration[len(P_d)+i]
+        print 'beta_s=', input_beta_zeroth_iteration[len(P_d)+len(P_t)+i]
         p+=1
 print 'number of pixel with log(sigma t) above 0:',p
 p=0
@@ -2115,7 +2649,7 @@ for i in range(10):
     #     print np.sqrt(sigma[j][j])
 
 
-    binsd=np.linspace(np.amin(input_beta_zeroth_iteration[:pixel_number]),np.amax(input_beta_zeroth_iteration[:pixel_number]),pixel_number)
+    binsd=np.linspace(np.amin(input_beta_zeroth_iteration[:len(P_d)]),np.amax(input_beta_zeroth_iteration[:len(P_d)]),pixel_number)
     for j in range(len(P_d_new)):
         for l in range(len(P_d_new[j])):
             index_list.append(pixel_list.index(P_d_new[j][l]))
@@ -2126,11 +2660,11 @@ for i in range(10):
     plt.title('B_d histogram iteration=%s'%i)
     plt.show()
 
-    binst=np.linspace(np.amin(input_beta_zeroth_iteration[pixel_number:2*pixel_number]),np.amax(input_beta_zeroth_iteration[pixel_number:2*pixel_number]),pixel_number)
+    binst=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),np.amax(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),pixel_number)
     for j in range(len(P_t_new)):
         for l in range(len(P_t_new[j])):
             index_list.append(pixel_list.index(P_t_new[j][l]))
-            temp_list5.append(index_list[l]+pixel_number)
+            temp_list5.append(index_list[l]+len(P_d))
         # print [x for x in input_beta_zeroth_iteration[templist5]]
         plt.hist([x for x in np.array(input_beta_zeroth_iteration)[temp_list5]],binst)
         temp_list5=[]
@@ -2139,11 +2673,11 @@ for i in range(10):
     plt.title('B_t histogram iteration=%s'%i)
     plt.show()
 
-    binss=np.linspace(np.amin(input_beta_zeroth_iteration[2*pixel_number:3*pixel_number]),np.amax(input_beta_zeroth_iteration[2*pixel_number:3*pixel_number]),pixel_number)
+    binss=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),np.amax(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),pixel_number)
     for j in range(len(P_s_new)):
         for l in range(len(P_s_new[j])):
             index_list.append(pixel_list.index(P_s_new[j][l]))
-            temp_list5.append(index_list[l]+2*pixel_number)
+            temp_list5.append(index_list[l]+len(P_d)+len(P_t))
         # print [x for x in input_beta_zeroth_iteration[templist5]]
         plt.hist([x for x in np.array(input_beta_zeroth_iteration)[temp_list5]],binss)
         temp_list5=[]
