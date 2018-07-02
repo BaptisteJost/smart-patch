@@ -1,7 +1,9 @@
-# import os
+#!/usr/bin/python
+# plt.c lose#
+import os
 #
-# path_to_fgbuster = '/mnt/c/Users/Baptiste/fgbuster'
-# os.sys.path.insert(0, os.path.realpath(path_to_fgbuster))
+path_to_fgbuster = '/global/homes/b/bjost/.conda/envs/myenv/lib/python2.7/site-packages/fgbuster/'
+os.sys.path.insert(0, os.path.realpath(path_to_fgbuster))
 
 
 import numpy as np
@@ -12,13 +14,23 @@ import sys
 import matplotlib.pyplot as plt
 import pysm
 # from numba import jit
-#import fgbuster as fg
+
 from fgbuster.pysm_helpers import get_instrument, get_sky
 from fgbuster.component_model import CMB, Dust, Synchrotron
 from fgbuster.separation_recipies import _get_prewhiten_factors,_A_evaluators
 import fgbuster.algebra as fgal
 import numdifftools
 import copy
+import time
+
+import numpy as np
+from mpi4py import MPI
+
+comm=MPI.COMM_WORLD
+size=comm.size
+rank=comm.rank
+barrier = comm.barrier
+root = 0
 # from mpl_toolkits.mplot3d import Axes3D
 #P_i = list of list for component i, each list corresponds to the pixel of one patch, i.e. P_d=[patch0, patch1,...,patchn] & patchi=[pixel0,pixel1,...]
 #input_set_of_betas is a list of all betas for each component and patch i.e. input_set_of_betas=[beta_d1,beta_d2,...,beta_dn,beta_s1,...,beta_sm,temp1,...,templ]
@@ -28,99 +40,107 @@ import copy
 #------------------------------------------------------SKY GENERATION----------------------------------------------------
 nside_comparison_for_fine_tuning=False
 if nside_comparison_for_fine_tuning!=True:
-    nside = 2
-    pixel_number=hp.nside2npix(nside)
-    pysm_model='c1d1s1'
-    sky = get_sky(nside, pysm_model)
-    nu = np.array([40.0, 50.0, 60.0, 68.4, 78.0, 88.5, 100.0, 118.9, 140.0, 166.0, 195.0, 234.9, 280.0, 337.4, 402.1])
+    if rank==0:
+        # print 'WARNING : nside must be a power of two '
+        # nside=input('nside=')
+        # print 'nside=',nside
+        start = time.time()
 
-    pixel_number=hp.nside2npix(nside)
+        nside = 2
+        pixel_number=hp.nside2npix(nside)
+        pysm_model='c1d1s1'
+        sky = get_sky(nside, pysm_model)
+        nu = np.array([40.0, 50.0, 60.0, 68.4, 78.0, 88.5, 100.0, 118.9, 140.0, 166.0, 195.0, 234.9, 280.0, 337.4, 402.1])
 
-    npix=hp.nside2npix(nside)
-    instrument = get_instrument(nside, 'litebird')
-    self=instrument
+        pixel_number=hp.nside2npix(nside)
 
-    pix_amin2 = 4. * np.pi / float(hp.nside2npix(self.Nside)) * (180. * 60. / np.pi) ** 2
-    """sigma_pix_I/P is std of noise per pixel. It is an array of length
-    equal to the number of input maps."""
-    sigma_pix_I = np.sqrt(self.Sens_I ** 2 / pix_amin2)
-    sigma_pix_P = np.sqrt(self.Sens_P ** 2 / pix_amin2)
+        npix=hp.nside2npix(nside)
+        instrument = get_instrument(nside, 'litebird')
+        self=instrument
 
-    np.random.seed (seed=None)
-    noise = np.random.randn(len(self.Sens_I), 3, npix)
-    noise[:, 0, :] *= sigma_pix_I[:, None]
-    noise[:, 1, :] *= sigma_pix_P[:, None]
-    noise[:, 2, :] *= sigma_pix_P[:, None]
+        pix_amin2 = 4. * np.pi / float(hp.nside2npix(self.Nside)) * (180. * 60. / np.pi) ** 2
+        """sigma_pix_I/P is std of noise per pixel. It is an array of length
+        equal to the number of input maps."""
+        sigma_pix_I = np.sqrt(self.Sens_I ** 2 / pix_amin2)
+        sigma_pix_P = np.sqrt(self.Sens_P ** 2 / pix_amin2)
 
-
-    freq_maps = instrument.observe(sky, write_outputs=False)[0] + noise
-    freq_maps=freq_maps[:,1:,:]  #on retire la temperature (1:) car on ne prend en compte que Q&U pas I
-    components = [CMB(), Dust(150.), Synchrotron(20.)]
-    prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)
-
-
-
-    hp.mollview(sky.cmb(nu)[1,1,:])
-    plt.savefig('true_res_11_nside=%s'%nside)
-    plt.show()
-    hp.mollview(sky.cmb(nu)[1,2,:])
-    plt.savefig('true_res_12_nside=%s'%nside)
-    plt.show()
-    # sys.exit()
-    # instrument = get_instrument(nside, 'litebird')
-    # freq_maps = instrument.observe(sky, write_outputs=False)[0] + instrument.observe(sky, write_outputs=False)[1]
-    # freq_maps=freq_maps[:,1:,:]  #on retire la temperature (1:) car on ne prend en compte que Q&U pas I
-    # components = [CMB(), Dust(150.), Synchrotron(20.)]
-    # prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)         # correspond a N^-1/2
-
-    print 'freq_maps shape',np.shape(freq_maps)
-
-    # print 'pysm.components.Dust.spectral_index',hp.read_map(pysm.components.Dust.Spectral_Index)
-    # hp.read_map(template('dust_beta.fits'), nside = nside, field = 0)
-
-    #----------------------------------------------------NO MASK---------------------------------------------------------------------
-    # mask_bin=[1]*pixel_number
-    # masked_pixels=[]
+        np.random.seed (seed=None)
+        noise = np.random.randn(len(self.Sens_I), 3, npix)
+        noise[:, 0, :] *= sigma_pix_I[:, None]
+        noise[:, 1, :] *= sigma_pix_P[:, None]
+        noise[:, 2, :] *= sigma_pix_P[:, None]
 
 
-    #----------------------------------------------------MASK-------------------------------------------------------------------------
-    mask=hp.read_map('../map_test/HFI_Mask_GalPlane-apo2_2048_R2.00.fits',field=2)
-    mask_bin=mask*0
-    mask_bin=hp.ud_grade(mask_bin,nside)
-    mask_bin[np.where(hp.ud_grade(mask,nside)!=0)[0]]=1
-    masked_pixels=[np.where(hp.ud_grade(mask,nside)==0)[0]]
-    print(' number of masked_pixels',len(masked_pixels[0]))
+        freq_maps = instrument.observe(sky, write_outputs=False)[0] + noise
+        freq_maps=freq_maps[:,1:,:]  #on retire la temperature (1:) car on ne prend en compte que Q&U pas I
+        components = [CMB(), Dust(150.), Synchrotron(20.)]
+        prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)
 
-    #--------------------------------------------------------------------------------------------------------------------------
-    freq_maps_save=freq_maps[:][:][:]
-    if len(masked_pixels)!=0:
-        freq_maps= np.zeros((len(freq_maps_save), len(freq_maps_save[0]),pixel_number-len(masked_pixels[0])))
-        # print 'freq_maps test',freq_maps
-        for i in range(len(freq_maps_save)):
-            for j in range(len(freq_maps_save[i])):
-                freq_maps[i][j]=np.delete(freq_maps_save[i][j],masked_pixels)
-                # print(np.delete(freq_maps_save[i][j],masked_pixels))
 
-        pixel_list=[]
-        # print('masked_pixels=',masked_pixels[1][0])
-        temp=[]
-        for j in range(pixel_number):
-            for i in range(len(masked_pixels[0])):
-                if j==masked_pixels[0][i]:
-                    temp.append(j)
-            if len(temp)==0:
-                pixel_list.append(j)
+
+        hp.mollview(sky.cmb(nu)[1,1,:])
+        plt.savefig('true_res_11_nside=%s'%nside)
+        plt.close()
+        hp.mollview(sky.cmb(nu)[1,2,:])
+        plt.savefig('true_res_12_nside=%s'%nside)
+        plt.close()
+        # sys.exit()
+        # instrument = get_instrument(nside, 'litebird')
+        # freq_maps = instrument.observe(sky, write_outputs=False)[0] + instrument.observe(sky, write_outputs=False)[1]
+        # freq_maps=freq_maps[:,1:,:]  #on retire la temperature (1:) car on ne prend en compte que Q&U pas I
+        # components = [CMB(), Dust(150.), Synchrotron(20.)]
+        # prewhiten_factors = _get_prewhiten_factors(instrument, freq_maps.shape)         # correspond a N^-1/2
+
+        print 'freq_maps shape',np.shape(freq_maps)
+
+        # print 'pysm.components.Dust.spectral_index',hp.read_map(pysm.components.Dust.Spectral_Index)
+        # hp.read_map(template('dust_beta.fits'), nside = nside, field = 0)
+
+        #----------------------------------------------------NO MASK---------------------------------------------------------------------
+        # mask_bin=[1]*pixel_number
+        # masked_pixels=[]
+
+
+        #----------------------------------------------------MASK-------------------------------------------------------------------------
+        mask=hp.read_map('HFI_Mask_GalPlane-apo2_2048_R2.00.fits',field=2)
+        mask_bin=mask*0
+        mask_bin=hp.ud_grade(mask_bin,nside)
+        mask_bin[np.where(hp.ud_grade(mask,nside)!=0)[0]]=1
+        masked_pixels=[np.where(hp.ud_grade(mask,nside)==0)[0]]
+        print(' number of masked_pixels',len(masked_pixels[0]))
+
+        #--------------------------------------------------------------------------------------------------------------------------
+        freq_maps_save=freq_maps[:][:][:]
+        if len(masked_pixels)!=0:
+            freq_maps= np.zeros((len(freq_maps_save), len(freq_maps_save[0]),pixel_number-len(masked_pixels[0])))
+            # print 'freq_maps test',freq_maps
+            for i in range(len(freq_maps_save)):
+                for j in range(len(freq_maps_save[i])):
+                    freq_maps[i][j]=np.delete(freq_maps_save[i][j],masked_pixels)
+                    # print(np.delete(freq_maps_save[i][j],masked_pixels))
+
+            pixel_list=[]
+            # print('masked_pixels=',masked_pixels[1][0])
             temp=[]
-        # print('pixel_list=',pixel_list)
-        pixel_number=pixel_number-len(masked_pixels[0])
-    else:
-        pixel_list=range(pixel_number)
+            for j in range(pixel_number):
+                for i in range(len(masked_pixels[0])):
+                    if j==masked_pixels[0][i]:
+                        temp.append(j)
+                if len(temp)==0:
+                    pixel_list.append(j)
+                temp=[]
+            # print('pixel_list=',pixel_list)
+            pixel_number=pixel_number-len(masked_pixels[0])
+        else:
+            pixel_list=range(pixel_number)
 
-    # print 'np.transpose(freq_maps)[0] shape',np.shape(np.transpose(freq_maps)[0])
-    # print 'np.diag(prewhiten_factors**2) shape',np.shape(np.diag(prewhiten_factors**2))
-    # print 'np.diag(prewhiten_factors) shape',np.shape(np.diag(prewhiten_factors))
-    # print 'prewhiten_factors shape',np.shape(prewhiten_factors)
-    noise=noise[:,1:,:]
+        # print 'np.transpose(freq_maps)[0] shape',np.shape(np.transpose(freq_maps)[0])
+        # print 'np.diag(prewhiten_factors**2) shape',np.shape(np.diag(prewhiten_factors**2))
+        # print 'np.diag(prewhiten_factors) shape',np.shape(np.diag(prewhiten_factors))
+        # print 'prewhiten_factors shape',np.shape(prewhiten_factors)
+        noise=noise[:,1:,:]
+
+        list_division=np.ceil(len(pixel_list)/size)
     # print 'np.transpose(noise)[0] shape', np.shape(np.transpose(noise)[0])
     # sys.exit()
 
@@ -131,7 +151,7 @@ if nside_comparison_for_fine_tuning!=True:
 #         freq_maps[i][j]=freq_maps_save[i][j]*mask_bin
 
 # hp.mollview(freq_maps[0][0])
-# plt.show()
+# plt.close()
 
 # P_d=[range(48),range(48,96),range(96,144),range(144,192)]
 # P_t=[range(48),range(48,96),range(96,144),range(144,192)]
@@ -219,50 +239,72 @@ def patch_map(input_set_of_betas,P_d,P_t,P_s,nside):
         ind+=1
     return map_bd,map_bt,map_bs
 
+# def joint_spectral_likelihood(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac): #computes the joint likelihood for the whole sky taking into account the patches
+#     #prewhiten_factors must be defined above !
+#     logL_spec=0
+#     #first we have to create the maps of beta in the sky to link each patch with its corresponding beta value
+#     # ind=0
+#     # pixel_number1=hp.nside2npix(nside)
+#     # map_bd=[None]*pixel_number1
+#     # map_bt=[None]*pixel_number1
+#     # map_bs=[None]*pixel_number1
+#     # # print('len(P_d)=',len(P_d))
+#     # # print('len(P_d[0])=',len(P_d[0]))
+#     # # print('np.shape(input_set_of_betas)=',np.shape(input_set_of_betas))
+#     # # print(P_d)
+#     # for i in range(len(P_d)):
+#     #     # print('map_bd=',np.shape(map_bd))
+#     #     # print 'i=',i
+#     #     for j in P_d[i]:
+#     #         # print 'j=',j
+#     #         map_bd[j]=input_set_of_betas[ind]
+#     #     ind+=1
+#     #
+#     # for i in range(len(P_t)):
+#     #     for j in P_t[i]:
+#     #         map_bt[j]=input_set_of_betas[ind]
+#     #     ind+=1
+#     #
+#     # for i in range(len(P_s)):
+#     #     for j in P_s[i]:
+#     #         map_bs[j]=input_set_of_betas[ind]
+#     #     ind+=1
+#
+#     # for p in pixel_list:
+#         # print(fun[p]([map_bd[p],map_bt[p],map_bs[p]]))
+#     # print 'fun[p]([map_bd[p],map_bt[p],map_bs[p]])',fun[p]([map_bd[p],map_bt[p],map_bs[p]])
+#     # print 'input_set_of_betas',input_set_of_betas
+#
+#     map_bd,map_bt,map_bs=patch_map(input_set_of_betas,P_d,P_t,P_s,nside)
+#     # print 'input_set_of_betas',input_set_of_betas
+#     # print 'jac',jac(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac)
+#
+#     for p in pixel_list:
+#         logL_spec+=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
+#     del map_bd,map_bt,map_bs
+#     return logL_spec
+
 def joint_spectral_likelihood(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac): #computes the joint likelihood for the whole sky taking into account the patches
     #prewhiten_factors must be defined above !
-    logL_spec=0
-    #first we have to create the maps of beta in the sky to link each patch with its corresponding beta value
-    # ind=0
-    # pixel_number1=hp.nside2npix(nside)
-    # map_bd=[None]*pixel_number1
-    # map_bt=[None]*pixel_number1
-    # map_bs=[None]*pixel_number1
-    # # print('len(P_d)=',len(P_d))
-    # # print('len(P_d[0])=',len(P_d[0]))
-    # # print('np.shape(input_set_of_betas)=',np.shape(input_set_of_betas))
-    # # print(P_d)
-    # for i in range(len(P_d)):
-    #     # print('map_bd=',np.shape(map_bd))
-    #     # print 'i=',i
-    #     for j in P_d[i]:
-    #         # print 'j=',j
-    #         map_bd[j]=input_set_of_betas[ind]
-    #     ind+=1
-    #
-    # for i in range(len(P_t)):
-    #     for j in P_t[i]:
-    #         map_bt[j]=input_set_of_betas[ind]
-    #     ind+=1
-    #
-    # for i in range(len(P_s)):
-    #     for j in P_s[i]:
-    #         map_bs[j]=input_set_of_betas[ind]
-    #     ind+=1
-
-    # for p in pixel_list:
-        # print(fun[p]([map_bd[p],map_bt[p],map_bs[p]]))
-    # print 'fun[p]([map_bd[p],map_bt[p],map_bs[p]])',fun[p]([map_bd[p],map_bt[p],map_bs[p]])
-    # print 'input_set_of_betas',input_set_of_betas
+    logL_spec=np.zeros(size)
+    logL_spec_tot=np.zeros(size)
+    start_list=int(rank*list_division)
+    stop_list=int((rank+1)*list_division)
+    if stop_list>len(pixel_list):
+        stop_list=len(pixel_list)
 
     map_bd,map_bt,map_bs=patch_map(input_set_of_betas,P_d,P_t,P_s,nside)
-    # print 'input_set_of_betas',input_set_of_betas
-    # print 'jac',jac(input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac)
 
-    for p in pixel_list:
-        logL_spec+=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
+    for p in pixel_list[start_list:stop_list]:
+        logL_spec[rank]+=fun[p]([map_bd[p],map_bt[p],map_bs[p]])
     del map_bd,map_bt,map_bs
+    comm.barrier()
+    comm.Reduce([logL_spec,MPI.DOUBLE],[logL_spec_tot,MPI.DOUBLE],op=MPI.SUM,root=0)
+    if rank==0:
+        sum_tot=np.sum(sum_tot)
     return logL_spec
+
+
 
 def joint_spectral_likelihood_one_patch(input_set_of_betas,P_i,patch_index,pixel_list,nside):
     logL_spec=0
@@ -447,6 +489,25 @@ def fisher_pixel(map_bd,map_bt,map_bs,fun,pixel_list,freq_maps,prewhiten_factors
     if Hessian==True:
         return fisher_list,s_list,n_cmb_list,fisher_s_list,fisher_n_list,fisher_hess_list
     return fisher_list,s_list,n_cmb_list,fisher_s_list,fisher_n_list
+
+def fisher_patch(P_d,P_t,P_s,fisher_list):
+    fisher_patch_bd=[0]*len(P_d)
+    fisher_patch_bt=[0]*len(P_t)
+    fisher_patch_bs=[0]*len(P_s)
+
+    for patch_num in range(len(P_d)):
+        for p in P_d[patch_num]:
+            fisher_patch_bd[patch_num]+=fisher_list[p]
+
+    for patch_num in range(len(P_t)):
+        for p in P_t[patch_num]:
+            fisher_patch_bt[patch_num]+=fisher_list[p]
+
+    for patch_num in range(len(P_s)):
+        for p in P_s[patch_num]:
+            fisher_patch_bs[patch_num]+=fisher_list[p]
+
+    return fisher_patch_bd,fisher_patch_bt,fisher_patch_bs
 
 def patch_making_pbyp(input_beta_zeroth_iteration,fisher_list,pixel_number,pixel_list):
 
@@ -995,12 +1056,13 @@ def return_jac(pixel,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB):
 # print(joint_spectral_likelihood(input_set_of_betas,P_d,P_t,P_s,freq_maps))
 
 if nside_comparison_for_fine_tuning!=True:
-    map_beta_dust_pysm=hp.ud_grade(hp.read_map('../map_test/pysm_maps/dust_beta.fits', field=0),nside)
-    map_temp_dust_pysm=hp.ud_grade(hp.read_map('../map_test/pysm_maps/dust_temp.fits', field=0),nside)
-    map_beta_sync_pysm=hp.ud_grade(hp.read_map('../map_test/pysm_maps/sync_beta.fits', field=0),nside)
-    map_beta_dust_pysm[masked_pixels]=None
-    map_temp_dust_pysm[masked_pixels]=None
-    map_beta_sync_pysm[masked_pixels]=None
+    if rank==0:
+        map_beta_dust_pysm=hp.ud_grade(hp.read_map('dust_beta.fits', field=0),nside)
+        map_temp_dust_pysm=hp.ud_grade(hp.read_map('dust_temp.fits', field=0),nside)
+        map_beta_sync_pysm=hp.ud_grade(hp.read_map('sync_beta.fits', field=0),nside)
+        map_beta_dust_pysm[masked_pixels]=None
+        map_temp_dust_pysm[masked_pixels]=None
+        map_beta_sync_pysm[masked_pixels]=None
 
 
 
@@ -1089,10 +1151,10 @@ if nside_comparison_for_fine_tuning==True:
 
             # hp.mollview(noise[0][0])
             # plt.savefig('../test_noise/noise_nside=%s_iter=%s.png'%(nside,iter))
-            # plt.show()
+            # plt.close()
 
 
-            mask=hp.read_map('../map_test/HFI_Mask_GalPlane-apo2_2048_R2.00.fits',field=2)
+            mask=hp.read_map('HFI_Mask_GalPlane-apo2_2048_R2.00.fits',field=2)
             mask_bin=mask*0
             mask_bin=hp.ud_grade(mask_bin,nside)
             mask_bin[np.where(hp.ud_grade(mask,nside)!=0)[0]]=1
@@ -1151,9 +1213,9 @@ if nside_comparison_for_fine_tuning==True:
             # pixel_number=pixel_number-1
 
 
-            map_beta_dust_pysm=hp.ud_grade(hp.read_map('../map_test/pysm_maps/dust_beta.fits', field=0),nside)
-            map_temp_dust_pysm=hp.ud_grade(hp.read_map('../map_test/pysm_maps/dust_temp.fits', field=0),nside)
-            map_beta_sync_pysm=hp.ud_grade(hp.read_map('../map_test/pysm_maps/sync_beta.fits', field=0),nside)
+            map_beta_dust_pysm=hp.ud_grade(hp.read_map('pysm_maps/dust_beta.fits', field=0),nside)
+            map_temp_dust_pysm=hp.ud_grade(hp.read_map('pysm_maps/dust_temp.fits', field=0),nside)
+            map_beta_sync_pysm=hp.ud_grade(hp.read_map('pysm_maps/sync_beta.fits', field=0),nside)
             map_beta_dust_pysm[masked_pixels]=None
             map_temp_dust_pysm[masked_pixels]=None
             map_beta_sync_pysm[masked_pixels]=None
@@ -1277,9 +1339,9 @@ if nside_comparison_for_fine_tuning==True:
                 #
                 #
                 # # plt.plot(beta_d_range,Z)
-                # # plt.show()
+                # # plt.close()
                 # # plt.plot(beta_d_range,Zj)
-                # # plt.show()
+                # # plt.close()
                 #
                 # fun_list=np.zeros(len(beta_d_range))
                 # for x in range(len(beta_d_range)):
@@ -1290,12 +1352,12 @@ if nside_comparison_for_fine_tuning==True:
                 # for x in range(len(beta_d_range)):
                 #     fun_list_plot[x]=np.exp(fun_list[x]-max_fun)
                 # plt.plot(beta_d_range,fun_list_plot)
-                # plt.show()
+                # plt.close()
 
                 # plt.title('fun of beta d & temp')
                 # plt.contourf(X, Y, Z,100)
                 # plt.colorbar()
-                # plt.show()
+                # plt.close()
                 #
                 # # fig = plt.figure()
                 # # ax3D = fig.add_subplot(111, projection='3d')
@@ -1305,7 +1367,7 @@ if nside_comparison_for_fine_tuning==True:
                 # plt.title('fun of beta d & beta s')
                 # plt.contourf(X, Y, Z, 100)
                 # plt.colorbar()
-                # plt.show()
+                # plt.close()
                 #
                 #
                 #
@@ -1316,7 +1378,7 @@ if nside_comparison_for_fine_tuning==True:
                 # plt.title('fun of temp & beta s')
                 # plt.contourf(X, Y, Z, 100)
                 # plt.colorbar()
-                # plt.show()
+                # plt.close()
 
 
                 # funxy=fun[pixel_test]([beta_d_range , temp_d_range , -3])
@@ -1329,15 +1391,15 @@ if nside_comparison_for_fine_tuning==True:
                 # fig = plt.figure()
                 # ax3D = fig.add_subplot(111, projection='3d')
                 # ax3D.plot_surface(beta_d_range,temp_d_range,np.array(funxy),label='fun of beta d & temp')
-                # plt.show()
+                # plt.close()
                 # fig = plt.figure()
                 # ax3D = fig.add_subplot(111, projection='3d')
                 # ax3D.plot_surface(beta_d_range,beta_s_range,np.array(funxz),label='fun of beta d & beta s')
-                # plt.show()
+                # plt.close()
                 # fig = plt.figure()
                 # ax3D = fig.add_subplot(111, projection='3d')
                 # ax3D.plot_surface(temp_d_range,beta_s_range,np.array(funyz),label='fun of temp & beta s')
-                # plt.show()
+                # plt.close()
 
                 # sys.exit()
                 if zeroth_iteration==True:
@@ -1418,7 +1480,7 @@ if nside_comparison_for_fine_tuning==True:
 
                             plt.plot(beta_t_range,fun_list_plot)
                             plt.xscale('log')
-                            plt.show()
+                            plt.close()
                             sys.exit()
 
                         # comp_sep_result_pixel.append(fgal.comp_sep(A_ev, np.transpose(freq_maps)[p], np.diag(prewhiten_factors**2 ), A_dB_ev, comp_of_dB,x0).x)
@@ -2194,8 +2256,8 @@ if nside_comparison_for_fine_tuning==True:
         # axs_comp_sep[1][0].set_title('mean_beta - beta_true sync comp_sep')
         # plt.title('residuals/noise nside=%s'%nside)
 
-        # plt.show(fig_comp_sep)
-    plt.show()
+        # plt.close(fig_comp_sep)
+    plt.close()
     sys.exit()
 
 
@@ -2208,6 +2270,7 @@ if nside_comparison_for_fine_tuning==True:
 #-----------------------------------------------ZEROTH ITERATION----------------------------------------------------------------------
 minimization=True
 plot_FOM=False
+display_plot_ners=False
 
 
 
@@ -2256,6 +2319,7 @@ fun=[None]*hp.nside2npix(nside)
 last_values=[None]*hp.nside2npix(nside)
 jac_list=[]
 
+start_fun_gen= time.time()
 for l in range(pixel_number):
      # prewhitened_data = prewhiten_factors * np.transpose(freq_maps)[l]
      # print 'np.transpose(freq_maps)[%s]'%l,np.transpose(freq_maps)[l]
@@ -2268,8 +2332,8 @@ for l in range(pixel_number):
      # last_values[pixel_list[l]]=last_valuestemp
      # print 'uev pixel:%s'%l,last_values[0]
      # del funtemp#, jactemp,last_valuestemp
-
-
+end_fun_gen= time.time()
+print 'time and jac gen 1=',end_fun_gen-start_fun_gen
 
 # for p in range(hp.nside2npix(nside)):
 #     funtemp, jactemp, last_valuestemp = fgal._build_bound_inv_logL_and_logL_dB(A_ev, prewhitened_data,np.diag(prewhiten_factors) , A_dB_ev, comp_of_param)
@@ -2280,6 +2344,7 @@ for l in range(pixel_number):
 comp=[]
 minimization_result_pixel=[]
 input_beta_zeroth_iteration=[]
+start_first_minimization= time.time()
 for p in range(pixel_number):
     # minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],([input_set_of_betas[p],input_set_of_betas[p+len(P_d)],input_set_of_betas[p+len(P_d)+len(P_t)]]),bounds=bounds).x)
     minimization_result_pixel.append(scipy.optimize.minimize(fun[pixel_list[p]],np.array([input_set_of_betas[p],input_set_of_betas[p+len(P_d)],input_set_of_betas[p+len(P_d)+len(P_t)]]),\
@@ -2297,7 +2362,7 @@ for p in range(pixel_number):
             plt.figure()
             plt.title('pixel = '+str(pixel_list[p])+' / beta = '+str(i))
             plt.plot(beta_v, logL, 'k-')
-            plt.show()
+            plt.close()
     """
 for i in range(pixel_number):
     input_beta_zeroth_iteration.append(minimization_result_pixel[i][0])
@@ -2307,28 +2372,33 @@ for i in range(pixel_number):
     input_beta_zeroth_iteration.append(minimization_result_pixel[i][2])
 minimization_result_pixel=[]
 
+end_first_minimization= time.time()
+print 'time first minimization=',end_first_minimization-start_first_minimization
 
+start_map_and_fisher_first= time.time()
 map_bd,map_bt,map_bs=patch_map(input_beta_zeroth_iteration,P_d,P_t,P_s,nside)
 fisher_list,s_list,n_cmb_list,fisher_s_list,fisher_n_list,fisher_hess_list=fisher_pixel(map_bd,map_bt,map_bs,fun,pixel_list,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB,Hessian=True)
+end_map_and_fisher_first= time.time()
+print 'time map and fisher first =',end_map_and_fisher_first-start_map_and_fisher_first
 
 #--------------------------------------------------------------beta residuals histograms with sigma display-----------------------------------------------------------------
-
+start_plot_report_1=time.time()
 plot_export_for_report=True
 if plot_export_for_report!=True:
     plt.hist([np.array(map_bd[x])-map_beta_dust_pysm[x] for x in pixel_list],pixel_number,histtype='step', label='beta dust residuals')
     plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]) ,pixel_number , histtype='step', label='sigma_d histogram')
     plt.legend()
-    plt.show()
+    plt.close()
 
     plt.hist([np.array(map_bt[x])-map_temp_dust_pysm[x] for x in pixel_list],pixel_number,histtype='step', label='temp dust residuals')
     plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]) ,pixel_number , histtype='step', label='sigma_t histogram')
     plt.legend()
-    plt.show()
+    plt.close()
 
     plt.hist([np.array(map_bs[x])-map_beta_sync_pysm[x] for x in pixel_list],pixel_number,histtype='step', label='beta sync residuals')
     plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]) ,pixel_number , histtype='step', label='sigma_s histogram')
     plt.legend()
-    plt.show()
+    plt.close()
 
 from textwrap import wrap
 
@@ -2392,8 +2462,8 @@ if plot_export_for_report==True:
     plt.title('Statistical Error on Beta Synchrotron : STEP 2')
     plt.savefig('error_iter0_bs_nside=%s'%nside)
     plt.close()
-
-
+end_plot_report_1=time.time()
+print 'time plot report 1=',end_plot_report_1-start_plot_report_1
 
 
 
@@ -2403,55 +2473,61 @@ if plot_export_for_report==True:
 # map_bd_sigma,map_bt_sigma,map_bs_sigma=patch_map(    ,P_d,P_t,P_s,nside)
 
 
-
-map_beta_dust_residuals=[np.nan]*hp.nside2npix(nside)
-map_bd_sigma=[np.nan]*hp.nside2npix(nside)
-map_temp_dust_residuals=[np.nan]*hp.nside2npix(nside)
-map_bt_sigma=[np.nan]*hp.nside2npix(nside)
-map_beta_sync_residuals=[np.nan]*hp.nside2npix(nside)
-map_bs_sigma=[np.nan]*hp.nside2npix(nside)
-
-for x in pixel_list:
-    map_beta_dust_residuals[x]=np.array(map_bd[x])-map_beta_dust_pysm[x]
-    map_temp_dust_residuals[x]=np.array(map_bt[x])-map_temp_dust_pysm[x]
-    map_beta_sync_residuals[x]=np.array(map_bs[x])-map_beta_sync_pysm[x]
-    map_bd_sigma[x]=np.array(np.sqrt(np.linalg.inv(fisher_list[x])[0][0]))
-    map_bt_sigma[x]=np.array(np.sqrt(np.linalg.inv(fisher_list[x])[1][1]))
-    map_bs_sigma[x]=np.array(np.sqrt(np.linalg.inv(fisher_list[x])[2][2]))
-# print map_beta_dust_residuals
 if plot_export_for_report!=True:
+    map_beta_dust_residuals=[np.nan]*hp.nside2npix(nside)
+    map_bd_sigma=[np.nan]*hp.nside2npix(nside)
+    map_temp_dust_residuals=[np.nan]*hp.nside2npix(nside)
+    map_bt_sigma=[np.nan]*hp.nside2npix(nside)
+    map_beta_sync_residuals=[np.nan]*hp.nside2npix(nside)
+    map_bs_sigma=[np.nan]*hp.nside2npix(nside)
+
+    for x in pixel_list:
+        map_beta_dust_residuals[x]=np.array(map_bd[x])-map_beta_dust_pysm[x]
+        map_temp_dust_residuals[x]=np.array(map_bt[x])-map_temp_dust_pysm[x]
+        map_beta_sync_residuals[x]=np.array(map_bs[x])-map_beta_sync_pysm[x]
+        map_bd_sigma[x]=np.array(np.sqrt(np.linalg.inv(fisher_list[x])[0][0]))
+        map_bt_sigma[x]=np.array(np.sqrt(np.linalg.inv(fisher_list[x])[1][1]))
+        map_bs_sigma[x]=np.array(np.sqrt(np.linalg.inv(fisher_list[x])[2][2]))
+    # print map_beta_dust_residuals
+
     hp.mollview( np.log(np.array(map_beta_dust_residuals)),sub=(2,2,1) )
     plt.title('beta dust residuals')
     hp.mollview(np.log(np.array(map_bd_sigma)),sub=(2,2,2))
     plt.title('sigma beta dust')
-    plt.show()
+    plt.close()
 
     hp.mollview( np.log(np.array(map_temp_dust_residuals)),sub=(2,2,1))
     plt.title('temps dust residuals')
     hp.mollview(np.log(np.array(map_bt_sigma)),sub=(2,2,2))
     plt.title('sigma temp dust')
-    plt.show()
+    plt.close()
 
     hp.mollview( np.log(np.array(map_beta_sync_residuals)),sub=(2,2,1))
     plt.title('beta sync residuals')
     hp.mollview(np.log(np.array(map_bs_sigma)),sub=(2,2,2))
     plt.title('sigma beta sync')
-    plt.show()
+    plt.close()
 
 
 
 #---------------------------------------------------------------New patches with pbyp method-------------------------------------------------------------------
-
+start_patch_making=time.time()
 P_d_pbyp , P_t_pbyp , P_s_pbyp , sigma_patch_list , beta2_patch_list = patch_making_pbyp(input_beta_zeroth_iteration,fisher_list,pixel_number,pixel_list)
+end_patch_making=time.time()
+print 'patch making time=',end_patch_making-start_patch_making
 # print '[np.sqrt(np.linalg.inv(fisher_list[x])[1][1]',sorted([np.sqrt(np.linalg.inv(fisher_list[x])[1][1])for x in pixel_list]) [-1]
 # print 'P_d_test shape',np.shape(P_d_test)
 # print 'P_t_test shape',np.shape(P_t_test)
 # print 'P_s_test shape',np.shape(P_s_test)
+start_error_maps=time.time()
 map_bd_new_sigma,map_bt_new_sigma,map_bs_new_sigma=patch_map(sigma_patch_list,P_d_pbyp,P_t_pbyp,P_s_pbyp,nside)
 map_bd_new_beta2,map_bt_new_beta2,map_bs_new_beta2=patch_map(beta2_patch_list,P_d_pbyp,P_t_pbyp,P_s_pbyp,nside)
+end_error_maps=time.time()
+print 'error maps time=',end_error_maps-start_error_maps
 
-
-if plot_export_for_report==True:
+start_plot_report_2=time.time()
+plot_patch_histo=False
+if plot_export_for_report==True and plot_patch_histo==True:
     index_list=[]
     temp_list5=[]
     binsd=np.linspace(np.amin(input_beta_zeroth_iteration[:len(P_d)]),np.amax(input_beta_zeroth_iteration[:len(P_d)]),pixel_number)
@@ -2491,6 +2567,8 @@ if plot_export_for_report==True:
     plt.savefig('patch_histo_bs_nside=%s'%nside)
     plt.close()
 
+end_plot_report_2=time.time()
+print 'time plot report 2=',end_plot_report_2-start_plot_report_2
 
 
 #---------------------------------------------------------new beta estimation over patches and corresponding map display------------------------------------
@@ -2515,25 +2593,34 @@ khi_list_jsl_dust=np.zeros(point_number)
 khi_list_jsl_temp=np.zeros(point_number)
 khi_list_jsl_sync=np.zeros(point_number)
 
-print pixel_list
+# print pixel_list
+start_min_jsl_list_bd=time.time()
 for patch in range(len(P_d_pbyp)):
     for x in range(point_number):
         khi_list_jsl_dust[x]=joint_spectral_likelihood(list(itertools.chain.from_iterable([input_set_of_betas_pbyp[:patch],[beta_d_range[x]],input_set_of_betas_pbyp[patch+1:]])),fun,P_d_pbyp,P_t_pbyp,P_s_pbyp,pixel_list,nside,jac)
     list_min_khi_jsl_dust.append(beta_d_range[np.argmin(khi_list_jsl_dust)])
     # print list_min_khi_jsl_dust[-1]
     khi_list_jsl_dust=np.zeros(point_number)
+end_min_jsl_list_bd=time.time()
+print 'min jsl list bd time=',end_min_jsl_list_bd-start_min_jsl_list_bd
 
+start_min_jsl_list_bt=time.time()
 for patch in range(len(P_t_pbyp)):
     for x in range(point_number):
         khi_list_jsl_temp[x]=joint_spectral_likelihood(list(itertools.chain.from_iterable([input_set_of_betas_pbyp[:len(P_d_pbyp)+patch],[beta_t_range[x]],input_set_of_betas_pbyp[len(P_d_pbyp)+patch+1:]])),fun,P_d_pbyp,P_t_pbyp,P_s_pbyp,pixel_list,nside,jac)
     list_min_khi_jsl_temp.append(beta_t_range[np.argmin(khi_list_jsl_temp)])
     khi_list_jsl_temp=np.zeros(point_number)
+end_min_jsl_list_bt=time.time()
+print 'min jsl list bt time=',end_min_jsl_list_bt-start_min_jsl_list_bt
 
+start_min_jsl_list_bs=time.time()
 for patch in range(len(P_s_pbyp)):
     for x in range(point_number):
         khi_list_jsl_sync[x]=joint_spectral_likelihood(list(itertools.chain.from_iterable([input_set_of_betas_pbyp[:len(P_d_pbyp)+len(P_t_pbyp)+patch],[beta_s_range[x]],input_set_of_betas_pbyp[len(P_d_pbyp)+len(P_t_pbyp)+patch+1:]])),fun,P_d_pbyp,P_t_pbyp,P_s_pbyp,pixel_list,nside,jac)
     list_min_khi_jsl_sync.append(beta_s_range[np.argmin(khi_list_jsl_sync)])
     khi_list_jsl_sync=np.zeros(point_number)
+end_min_jsl_list_bs=time.time()
+print 'min jsl list bs time=',end_min_jsl_list_bs-start_min_jsl_list_bs
 
 init_jsl = list_min_khi_jsl_dust + list_min_khi_jsl_temp + list_min_khi_jsl_sync
 print 'init jsl=',init_jsl
@@ -2576,8 +2663,10 @@ if minimization==True:
         super_bounds.append((-7.5,0.5))
 
     print 'input_set_of_betas_pbyp shape',np.shape(input_set_of_betas_pbyp)
-
+    start_jsl_minimization=time.time()
     new_set_of_beta_pbyp=scipy.optimize.minimize(joint_spectral_likelihood,init_jsl,(fun,P_d_pbyp,P_t_pbyp,P_s_pbyp,pixel_list,nside,return_jac_super_list), tol=1e-18,bounds=super_bounds,jac=return_jac_super_list).x
+    end_jsl_minimization=time.time()
+    print 'jsl minimization time=',end_jsl_minimization-start_jsl_minimization
     print 'new_set_of_beta_test',new_set_of_beta_pbyp
     map_bd_pbyp,map_bt_pbyp,map_bs_pbyp=patch_map(new_set_of_beta_pbyp,P_d_pbyp,P_t_pbyp,P_s_pbyp,nside)
 
@@ -2587,6 +2676,7 @@ if minimization==True:
     #     for i in range(len(meta_P)):
     #         print 'optimisation=',scipy.optimize.minimize(joint_spectral_likelihood_one_patch,input_set_of_betas,(meta_P,i,pixel_list,nside)).x
     # azer
+    start_plot_report_3=time.time()
     if plot_export_for_report!=True:
         hp.mollview(np.array(map_bd_pbyp),sub=(2,2,1), unit='beta dust')#,min=bounds[0][0],max=bounds[0][1])
         plt.title('beta dust map after joint likelihood minimization over pbyp patches')
@@ -2594,7 +2684,7 @@ if minimization==True:
         plt.title('dust temp map after joint likelihood minimization over pbyp patches')
         hp.mollview(np.array(map_bs_pbyp),sub=(2,2,3), unit='beta synchrotron')#,min=bounds[2][0],max=bounds[2][1])
         plt.title('beta sync map after joint likelihood minimization over pbyp patches')
-        plt.show()
+        plt.close()
     if plot_export_for_report==True:
         hp.mollview(np.array(map_bd_pbyp), unit='beta dust')#,min=bounds[0][0],max=bounds[0][1])
         plt.title('beta dust map last step')
@@ -2608,7 +2698,7 @@ if minimization==True:
         plt.title('beta sync map last step')
         plt.savefig('map_pbyp_bs_nside=%s'%nside)
         plt.close()
-        # plt.show()
+        # plt.close()
 
     #----------------------------------------------------------------histogram comparing beta zeroth iteration and beta from joint likelihood pbyp----------------
     if plot_export_for_report==True:
@@ -2648,14 +2738,14 @@ if minimization==True:
         ax_res_comp[0][0].legend()
         ax_res_comp[0][0].set_title('\n'.join(wrap('Histogram of the Difference between the Estimation and the True Value of Beta Dust for Both Methods')))
 
-        # plt.show()
+        # plt.close()
 
 
         ax_res_comp[0][1].hist(np.array([map_bt[x] - map_temp_dust_pysm[x] for x in pixel_list]),histtype='step', label='np approach')#,binsd) #,bins = np.linspace(-5, 5, num=20)
         ax_res_comp[0][1].hist(np.array([map_bt_pbyp[x] - map_temp_dust_pysm[x] for x in pixel_list]),histtype='step', label='adaptive approach')#,bins = np.linspace(-5, 5, num=20)
         ax_res_comp[0][1].set_title('\n'.join(wrap('Histogram of the Difference between the Estimation and the True Value of Dust Temperature for Both Methods')))
 
-        # plt.show()
+        # plt.close()
 
         ax_res_comp[1][0].hist(np.array([map_bs[x] - map_beta_sync_pysm[x] for x in pixel_list]),histtype='step', label='np approach')#,binsd) #,bins = np.linspace(-0.2, 0.2, num=20)
         ax_res_comp[1][0].hist(np.array([map_bs_pbyp[x] - map_beta_sync_pysm[x] for x in pixel_list]),histtype='step', label='adaptive approach')#,bins = np.linspace(-0.2, 0.2, num=20)
@@ -2663,7 +2753,7 @@ if minimization==True:
         ax_res_comp[1][0].set_title('\n'.join(wrap('Histogram of the Difference between the Estimation and the True Value of Beta Synchrotron for Both Methods')))
 
         fig_res_comp.show()
-        plt.show()
+        plt.close()
 print 'max normal res for beta dust=',np.amax(np.array([np.abs(map_bd[x] - map_beta_dust_pysm[x]) for x in pixel_list]))
 print 'max pbyp_jsl res for beta dust=',np.amax(np.array([np.abs(map_bd_pbyp[x] - map_beta_dust_pysm[x]) for x in pixel_list]))
 print ''
@@ -2678,30 +2768,98 @@ plot_FOM=True
 if minimization==True and plot_FOM==True:
     fisher_list_smart,s_list_smart,n_cmb_lis_smartt,fisher_s_list_smart,fisher_n_list_smart,fisher_hess_list_smart=fisher_pixel(map_bd_pbyp,map_bt_pbyp,map_bs_pbyp,fun,pixel_list,freq_maps,prewhiten_factors,A_ev,A_dB_ev,comp_of_dB,Hessian=True)
 
-    plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]) ,pixel_number , histtype='step', label='np approach')
-    plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[0][0]) for x in pixel_list]) ,pixel_number , histtype='step', label='adaptive approach')
+    # plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]) ,pixel_number , histtype='step', label='np approach')
+    # plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[0][0]) for x in pixel_list]) ,pixel_number , histtype='step', label='adaptive approach')
+    # plt.xlabel('Statistical Error on Beta Dust')
+    # plt.ylabel('pixel number')
+    # plt.legend()
+    # plt.title('Histogram of the Statistical Error on Beta Dust for Both Methods')
+    # plt.savefig('error_comparison_bd_nside=%s'%nside)
+    # plt.close()
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='np approach')
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='adaptive approach')
+    # plt.xlabel('Statistical Error on Dust Temperature')
+    # plt.ylabel('pixel number')
+    # plt.legend()
+    # plt.title('Histogram of the Statistical Error on Dust Temperature for Both Methods')
+    # plt.savefig('error_comparison_t_nside=%s'%nside)
+    # plt.close()
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='np approach')
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='adaptive approach')
+    # plt.xlabel('Statistical Error on Beta Synchrotron')
+    # plt.ylabel('pixel number')
+    # plt.legend()
+    # plt.title('Histogram of the Statistical Error on Beta Synchrotron for Both Methods')
+    # plt.savefig('error_comparison_bs_nside=%s'%nside)
+    # plt.close()
+
+    # sigma_patch_list
+    # map_bd_new_sigma,map_bt_new_sigma,map_bs_new_sigma
+    # plt.hist(np.array([map_bd_new_sigma[x] for x in pixel_list]),histtype='step', label='np approach' ,bins = np.linspace(0, np.amax([ np.sqrt(np.linalg.inv(fisher_list[p]) [0][0])  for p in pixel_list] ), num=P_d_pbyp))
+    # fisher_hess_list[p] = numdifftools.Hessian(fun[p])([map_bd[p],map_bt[p],map_bs[p]])
+    # input_set_of_betas,fun,P_d,P_t,P_s,pixel_list,nside,jac
+    # (fun[p])([map_bd[p],map_bt[p],map_bs[p]])
+
+    # start_hess_time=time.time()
+    # hess_jsl=numdifftools.Hessian(joint_spectral_likelihood)(new_set_of_beta_pbyp,fun,P_d_pbyp,P_t_pbyp,P_s_pbyp,pixel_list,nside,return_jac_super_list)
+    # end_hess_time=time.time()
+    # print 'hess time=',end_hess_time-start_hess_time
+    #
+    # print hess_jsl
+
+    fisher_pbyp_patch_bd,fisher_pbyp_patch_bt,fisher_pbyp_patch_bs = fisher_patch (P_d_pbyp , P_t_pbyp , P_s_pbyp , fisher_list_smart)
+
+    plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]) ,\
+                bins = 0.96*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [0][0])  for p in pixel_list] )[-2], num=pixel_number/2) , histtype='step', label='np approach')
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_pbyp_patch_bd[x])[0][0]) for x in range(len(P_d_pbyp))]), \
+                # bins = 0.98*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [0][0])  for p in pixel_list] )[-2], num=pixel_number/2) , histtype='step', label='adaptive approach fisher jsl')
+    plt.hist(np.array([np.sqrt(map_bd_new_sigma[x]) for x in pixel_list]), histtype='step', label='adaptive approach' ,\
+                bins = 1.0*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [0][0])  for p in pixel_list] )[-2], num=pixel_number/2))   # WARNING uses FISHER ITER 0
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(hess_jsl)[p][p]) for p in range(len(P_d_pbyp))]) ,\
+                # bins = 1.02*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [0][0])  for p in pixel_list] )[-2], num=pixel_number/2) , histtype='step', label='adaptive approach hessian jsl')
+    # plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[0][0]) for x in pixel_list]) , histtype='step', label='adaptive approach pixel',\
+                # bins = 1.04*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [0][0])  for p in pixel_list] )[-2], num=pixel_number/2))
     plt.xlabel('Statistical Error on Beta Dust')
     plt.ylabel('pixel number')
     plt.legend()
     plt.title('Histogram of the Statistical Error on Beta Dust for Both Methods')
     plt.savefig('error_comparison_bd_nside=%s'%nside)
     plt.close()
-    plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='np approach')
-    plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='adaptive approach')
+
+    plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),\
+                bins = 0.96*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [1][1])  for p in pixel_list] )[-2], num=pixel_number/2), histtype='step', label='np approach')
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_pbyp_patch_bt[x])[1][1]) for x in range(len(P_t_pbyp))]), \
+                # bins = 0.98*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [1][1])  for p in pixel_list] )[-2], num=pixel_number/2), histtype='step', label='adaptive approach fisher jsl')
+    plt.hist(np.array([np.sqrt(map_bt_new_sigma[x]) for x in pixel_list]),histtype='step', label='adaptive approach' ,\
+                bins = 1.0*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [1][1])  for p in pixel_list] )[-2], num=pixel_number/2))
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(hess_jsl)[p+len(P_d_pbyp)][p+len(P_d_pbyp)]) for p in range(len(P_t_pbyp))]) ,\
+                # bins = 1.02*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [1][1])  for p in pixel_list] )[-2], num=pixel_number/2) , histtype='step', label='adaptive approach hessian jsl')
+    # plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[0][0]) for x in pixel_list]) , histtype='step', label='adaptive approach pixel',\
+                # bins = 1.04*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [1][1])  for p in pixel_list] )[-2], num=pixel_number/2))
     plt.xlabel('Statistical Error on Dust Temperature')
     plt.ylabel('pixel number')
     plt.legend()
     plt.title('Histogram of the Statistical Error on Dust Temperature for Both Methods')
     plt.savefig('error_comparison_t_nside=%s'%nside)
     plt.close()
-    plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='np approach')
-    plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='adaptive approach')
+
+    plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),\
+                bins = 0.96*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [2][2])  for p in pixel_list] )[-2], num=pixel_number/2), histtype='step', label='np approach')
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_pbyp_patch_bs[x])[2][2]) for x in range(len(P_s_pbyp))]),\
+                # bins = 0.98*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [2][2])  for p in pixel_list] )[-2],num=pixel_number/2), histtype='step', label='adaptive approach fisher jsl')
+    plt.hist(np.array([np.sqrt(map_bs_new_sigma[x]) for x in pixel_list]),histtype='step', label='adaptive approach' ,\
+                bins = 1.0*np.linspace(0,sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [2][2])  for p in pixel_list] )[-2], num=pixel_number/2))
+    # plt.hist(np.array([np.sqrt(np.linalg.inv(hess_jsl)[p+len(P_d_pbyp)+len(P_t_pbyp)][p+len(P_d_pbyp)+len(P_t_pbyp)]) for p in range(len(P_s_pbyp))]) ,\
+                # bins = 1.02*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [2][2])  for p in pixel_list] )[-2], num=pixel_number/2) , histtype='step', label='adaptive approach hessian jsl')
+    # plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list_smart[x])[0][0]) for x in pixel_list]) , histtype='step', label='adaptive approach pixel',\
+                # bins = 1.04*np.linspace(0, sorted([ np.sqrt(np.linalg.inv(fisher_list[p]) [2][2])  for p in pixel_list] )[-2], num=pixel_number/2))
     plt.xlabel('Statistical Error on Beta Synchrotron')
     plt.ylabel('pixel number')
     plt.legend()
     plt.title('Histogram of the Statistical Error on Beta Synchrotron for Both Methods')
     plt.savefig('error_comparison_bs_nside=%s'%nside)
     plt.close()
+
 
     s_smart_00=[None]*hp.nside2npix(nside)
     s_smart_10=[None]*hp.nside2npix(nside)
@@ -2737,20 +2895,20 @@ if minimization==True and plot_FOM==True:
     hp.mollview((np.array(s_smart_00)))
     plt.title('s_smart_00')
     plt.savefig('map_smart_Q_nside=%s'%nside)
-    plt.show()
+    plt.close()
     hp.mollview((np.array(s_smart_10)))
     plt.title('s_smart_10')
     plt.savefig('map_smart_U_nside=%s'%nside)
-    plt.show()
+    plt.close()
 
     hp.mollview((np.array(s_idiot_00)))
     plt.title('s_idiot_00')
     plt.savefig('map_idiot_Q_nside=%s'%nside)
-    plt.show()
+    plt.close()
     hp.mollview((np.array(s_idiot_10)))
     plt.title('s_idiot_10')
     plt.savefig('map_idiot_U_nside=%s'%nside)
-    plt.show()
+    plt.close()
 
     plt.hist(np.array([delta_smart_00[p] for p in pixel_list]), histtype='step', label='C.M.B. residuals in Q parameter  with adaptive approach', bins = np.linspace(-0.09, 0.09, num=20))
     plt.hist(np.array([delta_idiot_00[p] for p in pixel_list]), histtype='step', label='C.M.B. residuals in Q parameter  with np approach', bins = np.linspace(-0.09, 0.09, num=20))
@@ -2759,7 +2917,7 @@ if minimization==True and plot_FOM==True:
     plt.title('C.M.B. residuals comparison for Q polarization')
     plt.legend()
     plt.savefig('histo_residuals_Q_nside=%s'%nside)
-    plt.show()
+    plt.close()
 
     plt.hist(np.array([delta_smart_01[p] for p in pixel_list]), histtype='step', label='C.M.B. residuals in U parameter  with adaptive approach', bins = np.linspace(-0.09, 0.09, num=20))
     plt.hist(np.array([delta_idiot_01[p] for p in pixel_list]), histtype='step', label='C.M.B. residuals in U parameter  with np approach', bins = np.linspace(-0.09, 0.09, num=20))
@@ -2768,7 +2926,7 @@ if minimization==True and plot_FOM==True:
     plt.title('C.M.B. residuals comparison for U polarization')
     plt.legend()
     plt.savefig('histo_residuals_U_nside=%s'%nside)
-    plt.show()
+    plt.close()
 
 
     # hist.
@@ -2793,7 +2951,7 @@ if minimization==True and patch_bin==True:
         index_list=[]
     plt.legend()
     plt.title('B_d histogram pbyp patches')
-    plt.show()
+    plt.close()
 
     binst=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),np.amax(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),pixel_number)
     for j in range(len(P_t_pbyp)):
@@ -2805,7 +2963,7 @@ if minimization==True and patch_bin==True:
         index_list=[]
     plt.legend()
     plt.title('B_t histogram pbyp patches')
-    plt.show()
+    plt.close()
 
     binss=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),np.amax(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),pixel_number)
     for j in range(len(P_s_pbyp)):
@@ -2817,7 +2975,7 @@ if minimization==True and patch_bin==True:
         index_list=[]
     plt.legend()
     plt.title('B_s histogram pbyp patches')
-    plt.show()
+    plt.close()
 
 
 
@@ -2844,48 +3002,51 @@ if plot_sigma_delta_map==True:
     plt.title('map_bd_new_sigma')
     hp.mollview(np.log(np.array(map_bd_new_beta2)),sub=(2,2,2))
     plt.title('map_bd_new_deltabeta2')
-    plt.show()
+    plt.close()
 
     hp.mollview(np.log(np.array(map_bt_new_sigma)),sub=(2,2,1))
     plt.title('map_bt_new_sigma')
     hp.mollview(np.log(np.array(map_bt_new_beta2)),sub=(2,2,2))
     plt.title('map_bt_new_deltabeta2')
-    plt.show()
+    plt.close()
 
     hp.mollview(np.log(np.array(map_bs_new_sigma)),sub=(2,2,1))
     plt.title('map_bs_new_sigma')
     hp.mollview(np.log(np.array(map_bs_new_beta2)),sub=(2,2,2))
     plt.title('map_bs_new_deltabeta2')
-    plt.show()
-
-
+    plt.close()
+end_plot_report_3=time.time()
+print 'plot report 3 time=',end_plot_report_3-start_plot_report_3
+end=time.time()
+print 'time total',end - start
+sys.exit()
 
 # print 's_q_d',s_q_d
 # hp.mollview(np.array(s_q_00))
 # plt.title('s[0][0]')
-# plt.show()
+# plt.close()
 #
 #
 # hp.mollview(np.array(s_q_10))
 # plt.title('s[1][0]')
-# plt.show()
+# plt.close()
 #
 #
 # hp.mollview(np.array(s_q_20))
 # plt.title('s[2][0]')
-# plt.show()
+# plt.close()
 #
 # hp.mollview(np.array(s_q_01))
 # plt.title('s[0][1]')
-# plt.show()
+# plt.close()
 #
 # hp.mollview(np.array(s_q_11))
 # plt.title('s[1][1]')
-# plt.show()
+# plt.close()
 #
 # hp.mollview(np.array(s_q_21))
 # plt.title('s[2][1]')
-# plt.show()
+# plt.close()
 # #
 # delta00=[None]*hp.nside2npix(nside)
 # delta01=[None]*hp.nside2npix(nside)
@@ -2895,11 +3056,11 @@ if plot_sigma_delta_map==True:
 #
 # hp.mollview(np.array(delta00))
 # plt.title('DELTA s[0][0]')
-# plt.show()
+# plt.close()
 #
 # hp.mollview(np.array(delta01))
 # plt.title('DELTA s[0][1]')
-# plt.show()
+# plt.close()
 
 
 # print 'u_e_v_last[0][1] sigma fisher2',last_values[0][0]
@@ -2952,7 +3113,7 @@ plt.subplot(2,2,4)
 plt.plot(comp)
 plt.title('Evolution of the norm over iterations')
 # plt.savefig('iteration=%s'%i)
-plt.show()
+plt.close()
 # plt.close()
 # sigma_list.append(np.linalg.norm(sigma))  UNCOMMENT !!!!
 
@@ -3068,7 +3229,7 @@ plt.plot(x_axis_list , gauss_list, label='fisher gaussian')
 plt.plot(x_axis_list , gauss_hess_list, label='hessian gaussian')
 plt.title('gaussian and fun comparison for pixel sigma d max')
 plt.legend()
-plt.show()
+plt.close()
 
 fun_list_plot=[]
 fun_list=[]
@@ -3096,7 +3257,7 @@ plt.plot(x_axis_list , gauss_list, label='fisher gaussian')
 plt.plot(x_axis_list , gauss_hess_list, label='hessian gaussian')
 plt.title('gaussian and fun comparison for pixel sigma t max')
 plt.legend()
-plt.show()
+plt.close()
 
 fun_list_plot=[]
 fun_list=[]
@@ -3129,7 +3290,7 @@ plt.plot(x_axis_list , gauss_list, label='fisher gaussian')
 plt.plot(x_axis_list , gauss_hess_list, label='hessian gaussian')
 plt.title('gaussian and fun comparison for pixel sigma s max')
 plt.legend()
-plt.show()
+plt.close()
 
 
 print '_______________________________________________________________________________'
@@ -3178,7 +3339,7 @@ for p in pixel_list:
 plt.hist( np.array([np.sqrt(np.linalg.inv(fisher_list[x])[0][0]) for x in pixel_list]) ,pixel_number , histtype='step', label='sigma_d histogram')
 plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_hess_list[x])[0][0]) for x in pixel_list if x not in forbidden_p]),pixel_number, histtype='step', label='sigma_d_hess histogram')
 plt.legend()
-plt.show()
+plt.close()
 
 
 forbidden_p=[]
@@ -3188,7 +3349,7 @@ for p in pixel_list:
 plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[1][1]) for x in pixel_list]),pixel_number, histtype='step', label='sigma_t histogram')
 plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_hess_list[x])[1][1]) for x in pixel_list if x not in forbidden_p]),pixel_number, histtype='step', label='sigma_t_hess histogram')
 plt.legend()
-plt.show()
+plt.close()
 
 forbidden_p=[]
 for p in pixel_list:
@@ -3197,21 +3358,21 @@ for p in pixel_list:
 plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='sigma_s histogram')
 plt.hist(np.array([np.sqrt(np.linalg.inv(fisher_hess_list[x])[2][2]) for x in pixel_list if x not in forbidden_p]),pixel_number, histtype='step', label='sigma_s_hess histogram')
 plt.legend()
-plt.show()
+plt.close()
 
 #------------------------------------------------------------BETA HISTO------------------------------------------------------
 
 plt.hist(np.array([input_beta_zeroth_iteration[x] for x in range(len(P_d))]),pixel_number/10)#,binsd)
 plt.title('beta_d histogram')
-plt.show()
+plt.close()
 
 plt.hist(np.array([input_beta_zeroth_iteration[x+len(P_d)] for x in range(len(P_t))]),pixel_number/10)#,binsd)
 plt.title('beta_t histogram')
-plt.show()
+plt.close()
 
 plt.hist(np.array([input_beta_zeroth_iteration[x+len(P_d) + len(P_t)] for x in range(len(P_s))]),pixel_number/10)#,binsd)
 plt.title('beta_s histogram')
-plt.show()
+plt.close()
 
 #------------------------------------------------------------SIGNAL/NOISE HISTO------------------------------------------------------
 
@@ -3222,7 +3383,7 @@ plt.hist(input_beta_zeroth_iteration[len(P_d) + pixel_list.index(x)]  /  np.arra
 
 plt.hist(np.abs(input_beta_zeroth_iteration[len(P_d)+len(P_t) + pixel_list.index(x)] ) /  np.array([np.sqrt(np.linalg.inv(fisher_list[x])[2][2]) for x in pixel_list]),pixel_number, histtype='step', label='signal/noise s histogram')#,binsd)
 plt.legend()
-plt.show()
+plt.close()
 
 for i in range(pixel_number):
     if np.log(np.array(sigma_t_map))[pixel_list[i]]>0:
@@ -3249,7 +3410,7 @@ hp.mollview(np.log(np.array(sigma_t_map)),sub=(2,2,2))
 plt.title('sigma^2 dust temp map iteration %s' %(i))
 hp.mollview(np.log(np.array(sigma_s_map)),sub=(2,2,3))
 plt.title('sigma^2 beta sync map iteration %s' %(i))
-plt.show()
+plt.close()
 
 
 
@@ -3265,13 +3426,13 @@ P_d_new,P_t_new,P_s_new,set_of_beta_slice=patch_making(input_beta_zeroth_iterati
 
 # hp.mollview(input_beta_zeroth_iteration[:48])
 # plt.title('beta dust map')
-# plt.show()
+# plt.close()
 # hp.mollview(input_beta_zeroth_iteration[48:96])
 # plt.title('dust temp map')
-# plt.show()
+# plt.close()
 # hp.mollview(input_beta_zeroth_iteration[96:144])
 # plt.title('beta sync map')
-# plt.show()
+# plt.close()
 
 
 #---------------------------------------------------------------------------ITERATION--------------------------------------------------------------
@@ -3281,11 +3442,11 @@ sigma_list=[]
     # templist5=[x+pixel_number for x in P_t[j]]
 # plt.hist([x for x in input_beta_zeroth_iteration[2*pixel_number:3*pixel_number]],pixel_number)
 #     # del templist5
-# plt.show()
+# plt.close()
 # plt.hist([x for x in input_beta_zeroth_iteration[2*pixel_number:120]],120-2*pixel_number)
 # plt.hist([x for x in input_beta_zeroth_iteration[120:3*pixel_number]],3*pixel_number-120)
 #     # del templist5
-# plt.show()
+# plt.close()
 
 
 zerty
@@ -3321,7 +3482,7 @@ for i in range(10):
         index_list=[]
     # plt.savefig('Bd_histo_iteration=%s'%i)
     plt.title('B_d histogram iteration=%s'%i)
-    plt.show()
+    plt.close()
 
     binst=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),np.amax(input_beta_zeroth_iteration[len(P_d):len(P_d)+len(P_t)]),pixel_number)
     for j in range(len(P_t_new)):
@@ -3334,7 +3495,7 @@ for i in range(10):
         index_list=[]
     # plt.savefig('Bt_histo_iteration=%s'%i)
     plt.title('B_t histogram iteration=%s'%i)
-    plt.show()
+    plt.close()
 
     binss=np.linspace(np.amin(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),np.amax(input_beta_zeroth_iteration[len(P_d)+len(P_t):len(P_d)+len(P_t)+len(P_s)]),pixel_number)
     for j in range(len(P_s_new)):
@@ -3347,7 +3508,7 @@ for i in range(10):
         index_list=[]
     # plt.savefig('Bs_histo_iteration=%s'%i)
     plt.title('B_s histogram iteration=%s'%i)
-    plt.show()
+    plt.close()
 
 
     hp.mollview(np.array(map_d),sub=(2,2,1),min=bounds[0][0],max=bounds[0][1])
@@ -3360,7 +3521,7 @@ for i in range(10):
     plt.plot(comp)
     plt.title('Evolution of the norm over iterations')
     # plt.savefig('iteration=%s'%i)
-    plt.show()
+    plt.close()
     # plt.close()
     sigma_list.append(np.linalg.norm(sigma))
 
@@ -3373,7 +3534,7 @@ for i in range(10):
     plt.title('sigma^2 dust temp map iteration %s' %(i))
     hp.mollview(np.array(sigma_s_map),sub=(2,2,3))
     plt.title('sigma^2 beta sync map iteration %s' %(i))
-    plt.show()
+    plt.close()
 
 
     # minimization_result=scipy.optimize.minimize(joint_spectral_likelihood,set_of_beta_slice,(P_d_new,P_t_new,P_s_new,nside))
@@ -3435,9 +3596,9 @@ plt.subplot(2,2,4)
 plt.plot(comp)
 plt.title('Evolution of the norm over iterations')
 # plt.savefig('iteration=%s'%i)
-plt.show()
+plt.close()
 # plt.close
 
 plt.plot(sigma_list)
 plt.title('Evolution of sigma norm')
-plt.show()
+plt.close()
